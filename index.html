@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ruta Camp Bot — Social Media Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── TOKENS ─── */
+    :root {
+      --green-900: #1B4332;
+      --green-700: #2D6A4F;
+      --green-500: #40916C;
+      --green-300: #74C69D;
+      --orange:    #F4A261;
+      --red:       #E76F51;
+      --bg:        #0D0F14;
+      --bg-1:      #13161E;
+      --bg-2:      #1A1E2B;
+      --border:    rgba(255,255,255,.08);
+      --text:      #E8EAED;
+      --muted:     #7A7F8E;
+    }
+
+    /* ─── RESET ─── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; overflow: hidden; }
+
+    /* ─── SCROLLBAR ─── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ─── SIDEBAR ─── */
+    .sidebar {
+      width: 220px; flex-shrink: 0;
+      background: var(--bg-1);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      padding: 20px 0; overflow: hidden;
+    }
+    .logo { padding: 0 18px 20px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+    .logo-name { font-size: 17px; font-weight: 700; color: var(--green-300); letter-spacing: -.3px; }
+    .logo-tag  { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+    .nav-group { padding: 0 10px; margin-bottom: 6px; }
+    .nav-label { font-size: 9px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); padding: 6px 8px 3px; }
+    .nav-btn {
+      display: flex; align-items: center; gap: 9px;
+      width: 100%; padding: 9px 10px; border-radius: 8px;
+      background: none; border: none; cursor: pointer;
+      font-size: 13px; color: var(--muted); text-align: left;
+      transition: background .15s, color .15s;
+    }
+    .nav-btn:hover  { background: var(--bg-2); color: var(--text); }
+    .nav-btn.active { background: rgba(64,145,108,.18); color: var(--green-300); }
+    .nav-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
+    .badge {
+      margin-left: auto; background: var(--red); color: #fff;
+      font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 20px;
+    }
+    .sidebar-bottom { margin-top: auto; padding: 0 10px; }
+
+    /* ─── MAIN ─── */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .view { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+    .view.active { display: flex; }
+
+    /* ─── VIEW HEADER ─── */
+    .vhead {
+      padding: 22px 26px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .vhead h1 { font-size: 20px; font-weight: 700; }
+    .vhead-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+    /* ─── BUTTONS ─── */
+    .btn {
+      padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 500;
+      border: none; cursor: pointer; transition: opacity .15s, background .15s;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn:hover { opacity: .85; }
+    .btn-primary  { background: var(--green-700); color: #fff; }
+    .btn-ghost    { background: var(--bg-2); color: var(--text); border: 1px solid var(--border); }
+    .btn-success  { background: var(--green-500); color: #fff; }
+    .btn-danger   { background: var(--red); color: #fff; }
+    .btn-warning  { background: var(--orange); color: #fff; }
+    .btn-sm       { padding: 5px 10px; font-size: 11px; }
+
+    /* ─── DASHBOARD ─── */
+    .scroll-area { flex: 1; overflow-y: auto; }
+    .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 22px 26px 0; }
+    @media (max-width: 1100px) { .stats-row { grid-template-columns: repeat(2,1fr); } }
+    .stat {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: 12px; padding: 18px 20px;
+    }
+    .stat-label { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+    .stat-value { font-size: 30px; font-weight: 700; }
+    .stat-hint  { font-size: 11px; color: var(--green-300); margin-top: 4px; }
+
+    .quick-actions { padding: 20px 26px 0; }
+    .quick-actions h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+    .qa-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .activity-section { padding: 20px 26px; }
+    .activity-section h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+    .activity-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 14px; background: var(--bg-1);
+      border: 1px solid var(--border); border-radius: 10px;
+      margin-bottom: 8px;
+    }
+    .activity-icon { font-size: 22px; flex-shrink: 0; }
+    .activity-text { flex: 1; font-size: 13px; }
+    .activity-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* ─── CHAT ─── */
+    .chat-wrap { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .messages { flex: 1; overflow-y: auto; padding: 22px 26px; display: flex; flex-direction: column; gap: 18px; }
+
+    .msg { display: flex; gap: 10px; }
+    .msg.user { flex-direction: row-reverse; }
+    .msg-av {
+      width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; font-size: 14px;
+    }
+    .msg.bot .msg-av  { background: linear-gradient(135deg, var(--green-900), var(--green-500)); }
+    .msg.user .msg-av { background: var(--bg-2); border: 1px solid var(--border); }
+    .msg-body {
+      max-width: 68%; background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 12px 15px; font-size: 13px; line-height: 1.65;
+    }
+    .msg.user .msg-body { background: rgba(64,145,108,.14); border-color: rgba(64,145,108,.28); }
+
+    /* Post preview card inside chat */
+    .post-card {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: 14px; overflow: hidden; max-width: 340px; margin-top: 4px;
+    }
+    .post-card-head {
+      display: flex; align-items: center; gap: 9px;
+      padding: 10px 14px; border-bottom: 1px solid var(--border);
+    }
+    .insta-av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg,#f093fb,#f5576c); flex-shrink: 0; }
+    .post-card-img {
+      width: 100%; aspect-ratio: 1; background: linear-gradient(135deg, var(--green-900), var(--green-700));
+      display: flex; align-items: center; justify-content: center; font-size: 44px;
+    }
+    .post-card-body { padding: 12px 14px; }
+    .post-caption  { font-size: 12px; line-height: 1.6; margin-bottom: 8px; }
+    .post-hashtags { font-size: 11px; color: #5BA3D9; line-height: 1.8; }
+    .post-card-actions {
+      display: flex; gap: 6px; padding: 10px 14px;
+      border-top: 1px solid var(--border); flex-wrap: wrap;
+    }
+    .type-badge {
+      font-size: 10px; padding: 2px 9px; border-radius: 20px;
+      background: rgba(64,145,108,.18); color: var(--green-300); font-weight: 500;
+    }
+
+    /* Type selector */
+    .type-row { display: flex; gap: 6px; padding: 12px 26px 0; flex-wrap: wrap; }
+    .type-chip {
+      padding: 5px 12px; border-radius: 20px; font-size: 12px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--bg-2); color: var(--muted);
+      transition: all .15s;
+    }
+    .type-chip.on { background: rgba(64,145,108,.2); border-color: var(--green-500); color: var(--green-300); }
+
+    /* Chat input */
+    .chat-input-wrap { padding: 12px 26px 16px; border-top: 1px solid var(--border); flex-shrink: 0; }
+    .input-row {
+      display: flex; gap: 8px; align-items: flex-end;
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 8px 10px;
+    }
+    textarea.ci {
+      flex: 1; background: none; border: none; outline: none;
+      color: var(--text); font-size: 13px; font-family: inherit;
+      resize: none; min-height: 22px; max-height: 130px; line-height: 1.5;
+    }
+    textarea.ci::placeholder { color: var(--muted); }
+    .send-btn {
+      width: 34px; height: 34px; border-radius: 8px; background: var(--green-700);
+      color: #fff; border: none; cursor: pointer; font-size: 16px;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+      transition: background .15s;
+    }
+    .send-btn:hover { background: var(--green-500); }
+    .send-btn:disabled { opacity: .45; cursor: default; }
+
+    /* ─── CALENDAR ─── */
+    .cal-wrap { flex: 1; overflow-y: auto; padding: 22px 26px; }
+    .cal-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+    .cal-month-lbl { font-size: 17px; font-weight: 600; flex: 1; }
+    .day-names { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; margin-bottom: 6px; }
+    .dn { text-align: center; font-size: 11px; color: var(--muted); font-weight: 500; padding: 4px 0; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; }
+    .cal-cell {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: 9px; min-height: 88px; padding: 8px;
+      cursor: pointer; transition: border-color .15s;
+    }
+    .cal-cell:hover { border-color: var(--green-500); }
+    .cal-cell.today { border-color: var(--green-300); }
+    .cal-cell.empty { background: transparent; border-color: transparent; cursor: default; }
+    .cal-day-num { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
+    .cal-cell.today .cal-day-num { color: var(--green-300); }
+    .cal-chip {
+      font-size: 10px; padding: 2px 6px; border-radius: 4px;
+      margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      cursor: pointer;
+    }
+    .cal-chip.pending   { background: rgba(244,162,97,.18); color: var(--orange); }
+    .cal-chip.approved  { background: rgba(64,145,108,.18); color: var(--green-300); }
+    .cal-chip.scheduled { background: rgba(91,163,217,.18); color: #5BA3D9; }
+    .cal-chip.published { background: rgba(122,127,142,.18); color: var(--muted); }
+
+    /* ─── APPROVAL LIST ─── */
+    .list-wrap { flex: 1; overflow-y: auto; padding: 22px 26px; display: flex; flex-direction: column; gap: 14px; }
+    .appr-card { background: var(--bg-1); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+    .appr-head {
+      padding: 13px 18px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .appr-body { display: flex; }
+    .appr-thumb {
+      width: 130px; flex-shrink: 0;
+      background: linear-gradient(135deg, var(--green-900), var(--green-700));
+      display: flex; align-items: center; justify-content: center; font-size: 36px;
+    }
+    .appr-content { flex: 1; padding: 14px 18px; }
+    .appr-caption { font-size: 13px; line-height: 1.6; margin-bottom: 8px; }
+    .appr-tags    { font-size: 11px; color: #5BA3D9; margin-bottom: 10px; }
+    .appr-hint    { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+    .appr-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    /* ─── LIBRARY ─── */
+    .lib-filter { padding: 14px 26px; border-bottom: 1px solid var(--border); display: flex; gap: 6px; flex-shrink: 0; }
+    .lib-grid { flex: 1; overflow-y: auto; padding: 18px 26px; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap: 10px; }
+    .media-card {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden; cursor: pointer;
+      transition: border-color .15s, transform .15s;
+    }
+    .media-card:hover { border-color: var(--green-500); transform: translateY(-2px); }
+    .media-card.selected { border-color: var(--green-300); box-shadow: 0 0 0 2px rgba(116,198,157,.25); }
+    .media-thumb-box {
+      aspect-ratio: 1; background: var(--bg-2);
+      display: flex; align-items: center; justify-content: center; font-size: 30px;
+      position: relative; overflow: hidden;
+    }
+    .media-thumb-box img { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; }
+    .media-info { padding: 7px 9px; }
+    .media-name { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ─── SETTINGS ─── */
+    .settings-wrap { flex: 1; overflow-y: auto; padding: 22px 26px; max-width: 620px; }
+    .settings-section { margin-bottom: 30px; }
+    .settings-section h2 { font-size: 14px; font-weight: 600; margin-bottom: 14px; color: var(--text); }
+    .form-group { margin-bottom: 14px; }
+    label.fl { display: block; font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+    .fi {
+      width: 100%; background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 9px 12px; color: var(--text);
+      font-size: 13px; outline: none; transition: border-color .15s; font-family: inherit;
+    }
+    .fi:focus { border-color: var(--green-500); }
+    .fi-hint { font-size: 10px; color: var(--muted); margin-top: 4px; }
+    .alert-warn {
+      background: rgba(244,162,97,.1); border: 1px solid rgba(244,162,97,.3);
+      border-radius: 10px; padding: 12px 16px; font-size: 12px; color: var(--orange);
+      margin-bottom: 20px; line-height: 1.6;
+    }
+
+    /* ─── SPINNER ─── */
+    .loading-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .spin {
+      width: 15px; height: 15px; border: 2px solid var(--border);
+      border-top-color: var(--green-300); border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── TOAST ─── */
+    .toast {
+      position: fixed; bottom: 22px; right: 22px;
+      background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 18px; font-size: 13px; max-width: 300px;
+      transform: translateY(80px); opacity: 0; transition: all .25s; z-index: 999;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.success { border-color: var(--green-500); }
+    .toast.error   { border-color: var(--red); }
+    .toast.warning { border-color: var(--orange); }
+
+    /* ─── MODAL ─── */
+    .overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.65); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    .overlay.show { display: flex; }
+    .modal-box {
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: 16px; padding: 26px; width: 92%; max-width: 480px;
+      max-height: 82vh; overflow-y: auto;
+    }
+    .modal-title { font-size: 16px; font-weight: 600; margin-bottom: 18px; }
+
+    /* ─── EMPTY STATE ─── */
+    .empty {
+      text-align: center; padding: 56px 20px;
+      color: var(--muted); display: flex; flex-direction: column;
+      align-items: center; gap: 12px;
+    }
+    .empty-icon { font-size: 52px; }
+
+    /* ─── STATUS DOTS ─── */
+    .sdot {
+      display: inline-block; width: 6px; height: 6px;
+      border-radius: 50%; margin-right: 5px;
+    }
+    .sdot.pending   { background: var(--orange); }
+    .sdot.approved  { background: var(--green-300); }
+    .sdot.published { background: var(--muted); }
+    .sdot.scheduled { background: #5BA3D9; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+<aside class="sidebar">
+  <div class="logo">
+    <div class="logo-name">🏕️ Ruta Camp</div>
+    <div class="logo-tag">Social Media Bot</div>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-label">Principal</div>
+    <button class="nav-btn active" onclick="nav('dashboard')">
+      <span class="nav-icon">📊</span> Dashboard
+    </button>
+    <button class="nav-btn" onclick="nav('create')">
+      <span class="nav-icon">✨</span> Crear Contenido
+    </button>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-label">Gestión</div>
+    <button class="nav-btn" onclick="nav('calendar')">
+      <span class="nav-icon">📅</span> Calendario
+    </button>
+    <button class="nav-btn" onclick="nav('pending')">
+      <span class="nav-icon">⏳</span> Pendientes
+      <span class="badge" id="pendBadge" style="display:none">0</span>
+    </button>
+    <button class="nav-btn" onclick="nav('published')">
+      <span class="nav-icon">✅</span> Publicaciones
+    </button>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-label">Recursos</div>
+    <button class="nav-btn" onclick="nav('library')">
+      <span class="nav-icon">🖼️</span> Biblioteca
+    </button>
+  </div>
+
+  <div class="sidebar-bottom">
+    <button class="nav-btn" onclick="nav('settings')">
+      <span class="nav-icon">⚙️</span> Configuración
+    </button>
+  </div>
+</aside>
+
+<!-- ═══════════════════ MAIN ═══════════════════ -->
+<main class="main">
+
+  <!-- ── DASHBOARD ── -->
+  <div class="view active" id="v-dashboard">
+    <div class="vhead">
+      <div>
+        <h1>Dashboard</h1>
+        <div class="vhead-sub">Resumen de Ruta Camp en redes sociales</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="syncBuffer()">🔄 Sync Buffer</button>
+        <button class="btn btn-primary" onclick="nav('create')">+ Crear</button>
+      </div>
+    </div>
+    <div class="scroll-area" id="dashboard-scroll">
+      <div class="stats-row">
+        <div class="stat">
+          <div class="stat-label">Esta semana</div>
+          <div class="stat-value" id="s-week">0</div>
+          <div class="stat-hint">publicaciones creadas</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Pendientes de aprobación</div>
+          <div class="stat-value" id="s-pend">0</div>
+          <div class="stat-hint">esperando revisión</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Total publicadas</div>
+          <div class="stat-value" id="s-total">0</div>
+          <div class="stat-hint">en historial</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Imágenes en Drive</div>
+          <div class="stat-value" id="s-imgs">0</div>
+          <div class="stat-hint">disponibles</div>
+        </div>
+      </div>
+
+      <div class="quick-actions" style="margin-top:22px;">
+        <h2>Generación Rápida</h2>
+        <div class="qa-row">
+          <button class="btn btn-ghost" onclick="quickGen('week')">📅 Planificar Semana</button>
+          <button class="btn btn-ghost" onclick="quickGen('month')">📆 Planificar Mes</button>
+          <button class="btn btn-ghost" onclick="quickGen('semester')">🗓️ Planificar Semestre</button>
+          <button class="btn btn-ghost" onclick="nav('library')">🖼️ Ver Biblioteca</button>
+        </div>
+      </div>
+
+      <div class="activity-section">
+        <h2>Actividad Reciente</h2>
+        <div id="actList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── CREATE ── -->
+  <div class="view" id="v-create">
+    <div class="vhead">
+      <div>
+        <h1>Crear Contenido</h1>
+        <div class="vhead-sub">Describe lo que necesitas y la IA lo creará para ti</div>
+      </div>
+    </div>
+    <div class="chat-wrap">
+      <div class="messages" id="msgs">
+        <div class="msg bot">
+          <div class="msg-av">🏕️</div>
+          <div class="msg-body">
+            ¡Hola! Soy el bot de <strong>Ruta Camp</strong> para Instagram. Puedo crear <strong>posts, reels, historias y carruseles</strong> con el contenido de tu Drive.<br><br>
+            Dime qué necesitas:<br>
+            • "Crea un post sobre senderismo en invierno"<br>
+            • "Haz un carrusel con consejos de campamento"<br>
+            • "Genera una historia para promocionar nuestros tours"<br>
+            • "Planifica el contenido de esta semana"
+          </div>
+        </div>
+      </div>
+
+      <div class="type-row" id="typeRow">
+        <div class="type-chip on" data-t="post"     onclick="pickType(this)">📷 Post</div>
+        <div class="type-chip"    data-t="reel"     onclick="pickType(this)">🎬 Reel</div>
+        <div class="type-chip"    data-t="story"    onclick="pickType(this)">📱 Historia</div>
+        <div class="type-chip"    data-t="carousel" onclick="pickType(this)">🔄 Carrusel</div>
+      </div>
+
+      <div class="chat-input-wrap">
+        <div class="input-row">
+          <textarea class="ci" id="ci" placeholder="Describe el contenido que quieres crear..." rows="1"
+            onkeydown="ciKey(event)" oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>
+          <button class="send-btn" id="sendBtn" onclick="send()">›</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── CALENDAR ── -->
+  <div class="view" id="v-calendar">
+    <div class="vhead">
+      <h1>Calendario de Publicaciones</h1>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-ghost btn-sm" onclick="calPrev()">←</button>
+        <button class="btn btn-ghost btn-sm" id="calLbl" onclick="calToday()">Hoy</button>
+        <button class="btn btn-ghost btn-sm" onclick="calNext()">→</button>
+      </div>
+    </div>
+    <div class="cal-wrap" id="calWrap"></div>
+  </div>
+
+  <!-- ── PENDING ── -->
+  <div class="view" id="v-pending">
+    <div class="vhead">
+      <h1>Pendientes de Aprobación</h1>
+      <button class="btn btn-success btn-sm" onclick="approveAll()">✅ Aprobar Todo</button>
+    </div>
+    <div class="list-wrap" id="pendList"></div>
+  </div>
+
+  <!-- ── PUBLISHED ── -->
+  <div class="view" id="v-published">
+    <div class="vhead"><h1>Publicaciones</h1></div>
+    <div class="list-wrap" id="pubList"></div>
+  </div>
+
+  <!-- ── LIBRARY ── -->
+  <div class="view" id="v-library">
+    <div class="vhead">
+      <h1>Biblioteca de Medios</h1>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost btn-sm" onclick="loadDrive()">🔄 Actualizar Drive</button>
+        <button class="btn btn-primary btn-sm" onclick="connectDrive()">Conectar Drive</button>
+      </div>
+    </div>
+    <div class="lib-filter">
+      <button class="btn btn-ghost btn-sm" onclick="filterLib('all')">Todos</button>
+      <button class="btn btn-ghost btn-sm" onclick="filterLib('image')">🖼️ Imágenes</button>
+      <button class="btn btn-ghost btn-sm" onclick="filterLib('video')">🎬 Videos</button>
+    </div>
+    <div class="lib-grid" id="libGrid">
+      <div class="empty" style="grid-column:1/-1">
+        <div class="empty-icon">🖼️</div>
+        <p>Conecta tu Google Drive para ver tus medios</p>
+        <button class="btn btn-primary" onclick="connectDrive()">Conectar Google Drive</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SETTINGS ── -->
+  <div class="view" id="v-settings">
+    <div class="vhead"><h1>Configuración</h1></div>
+    <div class="settings-wrap">
+
+      <div class="alert-warn">
+        ⚠️ <strong>Seguridad:</strong> Las claves se guardan solo en tu navegador (localStorage).
+        Nunca compartas esta URL con otras personas ni uses el bot en computadores públicos.
+      </div>
+
+      <div class="settings-section">
+        <h2>🤖 Claude API (Anthropic)</h2>
+        <div class="form-group">
+          <label class="fl">Clave API</label>
+          <input type="password" class="fi" id="sClaudeKey" placeholder="sk-ant-..." oninput="saveSett()">
+        </div>
+        <div class="form-group">
+          <label class="fl">Modelo</label>
+          <select class="fi" id="sClaudeModel" onchange="saveSett()">
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Recomendado)</option>
+            <option value="claude-opus-4-7">Claude Opus 4.7 (Más potente)</option>
+            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Más rápido)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h2>📤 Buffer</h2>
+        <div class="form-group">
+          <label class="fl">Token de Acceso</label>
+          <input type="password" class="fi" id="sBufferToken" placeholder="Token de Buffer..." oninput="saveSett()">
+        </div>
+        <div class="form-group">
+          <label class="fl">ID de Perfil de Instagram</label>
+          <input type="text" class="fi" id="sBufferProfile" placeholder="ID del perfil" oninput="saveSett()">
+          <div class="fi-hint">
+            <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="detectBufferProfiles()">🔍 Detectar Perfiles Automáticamente</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h2>📁 Google Drive</h2>
+        <div class="form-group">
+          <label class="fl">Google API Key</label>
+          <input type="password" class="fi" id="sGoogleKey" placeholder="AIza..." oninput="saveSett()">
+          <div class="fi-hint">Obtén una en <strong>console.cloud.google.com</strong> → APIs → Drive API → Credentials</div>
+        </div>
+        <div class="form-group">
+          <label class="fl">Google OAuth Client ID</label>
+          <input type="text" class="fi" id="sGoogleClient" placeholder="xxx.apps.googleusercontent.com" oninput="saveSett()">
+        </div>
+        <div class="form-group">
+          <label class="fl">ID de Carpeta (opcional)</label>
+          <input type="text" class="fi" id="sDriveFolder" placeholder="ID de la carpeta en Drive" oninput="saveSett()">
+          <div class="fi-hint">Copia el ID desde la URL de tu carpeta en Drive</div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h2>🏕️ Perfil de Ruta Camp</h2>
+        <div class="form-group">
+          <label class="fl">Nombre de la marca</label>
+          <input type="text" class="fi" id="sBrandName" value="Ruta Camp" oninput="saveSett()">
+        </div>
+        <div class="form-group">
+          <label class="fl">Descripción / Tono de comunicación</label>
+          <textarea class="fi" id="sBrandTone" rows="3" oninput="saveSett()"
+            placeholder="Ej: Somos una empresa de turismo outdoor. Tono aventurero, cercano y apasionado por la naturaleza..."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="fl">Hashtags fijos (separados por espacio)</label>
+          <input type="text" class="fi" id="sBrandTags" placeholder="#rutacamp #outdoor #aventura #senderismo" oninput="saveSett()">
+        </div>
+        <div class="form-group">
+          <label class="fl">Idioma del contenido</label>
+          <select class="fi" id="sLang" onchange="saveSett()">
+            <option value="es">Español</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" onclick="saveSett();toast('Configuración guardada ✅','success')">Guardar Configuración</button>
+    </div>
+  </div>
+
+</main>
+
+<!-- ─── TOAST ─── -->
+<div class="toast" id="toastEl"></div>
+
+<!-- ─── MODAL ─── -->
+<div class="overlay" id="overlay" onclick="closeModal(event)">
+  <div class="modal-box" id="mbox">
+    <div class="modal-title" id="mtitle"></div>
+    <div id="mcontent"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════ SCRIPT ═══════════════════ -->
+<script>
+'use strict';
+
+/* ══════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════ */
+const S = {
+  view:       'dashboard',
+  type:       'post',
+  posts:      [],
+  media:      [],
+  calDate:    new Date(),
+  busy:       false,
+  sett:       {},
+};
+
+/* ══════════════════════════════════════════════
+   STORAGE
+══════════════════════════════════════════════ */
+const DB = {
+  get: (k, d = null) => { try { return JSON.parse(localStorage.getItem('rc_'+k)) ?? d; } catch { return d; } },
+  set: (k, v)        => { try { localStorage.setItem('rc_'+k, JSON.stringify(v)); } catch {} },
+};
+
+/* ══════════════════════════════════════════════
+   SETTINGS
+══════════════════════════════════════════════ */
+function loadSett() {
+  const s = DB.get('sett', {});
+  S.sett = s;
+  const map = {
+    sClaudeKey: 'claudeKey', sClaudeModel: 'claudeModel',
+    sBufferToken: 'bufferToken', sBufferProfile: 'bufferProfile',
+    sGoogleKey: 'googleKey', sGoogleClient: 'googleClient', sDriveFolder: 'driveFolder',
+    sBrandName: 'brandName', sBrandTone: 'brandTone', sBrandTags: 'brandTags', sLang: 'lang',
+  };
+  Object.entries(map).forEach(([elId, key]) => {
+    const el = document.getElementById(elId);
+    if (el && s[key]) el.value = s[key];
+  });
+}
+
+function saveSett() {
+  const s = {
+    claudeKey:     document.getElementById('sClaudeKey').value,
+    claudeModel:   document.getElementById('sClaudeModel').value || 'claude-sonnet-4-6',
+    bufferToken:   document.getElementById('sBufferToken').value,
+    bufferProfile: document.getElementById('sBufferProfile').value,
+    googleKey:     document.getElementById('sGoogleKey').value,
+    googleClient:  document.getElementById('sGoogleClient').value,
+    driveFolder:   document.getElementById('sDriveFolder').value,
+    brandName:     document.getElementById('sBrandName').value || 'Ruta Camp',
+    brandTone:     document.getElementById('sBrandTone').value,
+    brandTags:     document.getElementById('sBrandTags').value,
+    lang:          document.getElementById('sLang').value || 'es',
+  };
+  S.sett = s;
+  DB.set('sett', s);
+}
+
+/* ══════════════════════════════════════════════
+   NAVIGATION
+══════════════════════════════════════════════ */
+function nav(v) {
+  document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('v-' + v).classList.add('active');
+  document.querySelectorAll('.nav-btn').forEach(el => {
+    if (el.getAttribute('onclick')?.includes(`'${v}'`)) el.classList.add('active');
+  });
+  S.view = v;
+  if (v === 'dashboard') renderDash();
+  if (v === 'calendar')  renderCal();
+  if (v === 'pending')   renderPend();
+  if (v === 'published') renderPub();
+  if (v === 'library')   renderLib();
+  if (v === 'settings')  loadSett();
+}
+
+/* ══════════════════════════════════════════════
+   CLAUDE API
+══════════════════════════════════════════════ */
+function buildSystemPrompt() {
+  const { brandName = 'Ruta Camp', brandTone = 'empresa de turismo outdoor, aventurero y apasionado', brandTags = '#rutacamp #outdoor', lang = 'es' } = S.sett;
+  const language = lang === 'en' ? 'English' : 'Español';
+  return `Eres el asistente de redes sociales de ${brandName}.
+Descripción/Tono: ${brandTone}
+Idioma: ${language}
+Hashtags de la marca: ${brandTags}
+
+IMPORTANTE: Cuando generes contenido para Instagram, SIEMPRE devuelve SOLO JSON válido con este formato exacto (sin texto adicional fuera del JSON):
+
+Para UN SOLO post/reel/historia/carrusel:
+{
+  "type": "post|reel|story|carousel",
+  "caption": "Texto principal del post (puede tener emojis y saltos de línea con \\n)",
+  "hashtags": "#hashtag1 #hashtag2 ...",
+  "imageDescription": "Descripción detallada de la imagen o video ideal para este post",
+  "scheduleHint": "Sugerencia de horario óptimo (ej: Martes 9:00am)",
+  "slides": []
+}
+
+Para CARRUSELES, incluye las diapositivas en "slides":
+{
+  "type": "carousel",
+  "caption": "...",
+  "hashtags": "...",
+  "imageDescription": "...",
+  "scheduleHint": "...",
+  "slides": [
+    {"caption": "Slide 1", "imageDescription": "Imagen slide 1"},
+    {"caption": "Slide 2", "imageDescription": "Imagen slide 2"}
+  ]
+}
+
+Para PLANIFICACIÓN (semana/mes/semestre), devuelve:
+{
+  "batch": true,
+  "posts": [ ...array de posts con el formato individual... ]
+}
+
+Incluye siempre los hashtags de la marca más hashtags relevantes al contenido.
+Mantén el tono de ${brandName} en todo el contenido.`;
+}
+
+async function callClaude(messages) {
+  const { claudeKey, claudeModel } = S.sett;
+  if (!claudeKey) {
+    toast('Configura tu clave API de Claude en ⚙️ Configuración', 'error');
+    nav('settings');
+    throw new Error('No API key');
+  }
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': claudeKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: claudeModel || 'claude-sonnet-4-6',
+      max_tokens: 8096,
+      system: buildSystemPrompt(),
+      messages,
+    }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error?.message || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+/* ══════════════════════════════════════════════
+   CHAT
+══════════════════════════════════════════════ */
+function pickType(el) {
+  document.querySelectorAll('.type-chip').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+  S.type = el.dataset.t;
+}
+
+function ciKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+}
+
+async function send() {
+  const ci = document.getElementById('ci');
+  const text = ci.value.trim();
+  if (!text || S.busy) return;
+  ci.value = ''; ci.style.height = 'auto';
+
+  addMsg(text, 'user');
+  S.busy = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  const typeLabel = { post:'post', reel:'reel', story:'historia', carousel:'carrusel' }[S.type];
+  const prompt = `Tipo de contenido solicitado: ${typeLabel}\n\nSolicitud del usuario: ${text}`;
+
+  const loadEl = addMsg('<div class="loading-row"><div class="spin"></div> Generando con IA...</div>', 'bot', true);
+
+  try {
+    const res  = await callClaude([{ role:'user', content: prompt }]);
+    const text2 = res.content[0].text;
+
+    // Extract JSON from response
+    let data = null;
+    const m = text2.match(/\{[\s\S]*\}/);
+    if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
+
+    loadEl.remove();
+
+    if (data?.batch && Array.isArray(data.posts)) {
+      data.posts.forEach(p => savePost({ ...p, status:'pending', createdAt: new Date().toISOString() }));
+      addMsg(`✅ Generé <strong>${data.posts.length} publicaciones</strong> y las agregué a Pendientes para tu revisión.`, 'bot');
+      toast(`${data.posts.length} publicaciones creadas`, 'success');
+    } else if (data) {
+      const post = savePost({ ...data, type: data.type || S.type, status:'pending', createdAt: new Date().toISOString() });
+      addMsg('✅ Publicación creada y agregada a <strong>Pendientes</strong> para que la apruebes o modifiques.', 'bot');
+      renderPostCard(post);
+    } else {
+      addMsg(text2, 'bot');
+    }
+    updateBadge();
+  } catch (err) {
+    loadEl.remove();
+    addMsg(`❌ Error: ${err.message}`, 'bot');
+  }
+
+  S.busy = false;
+  document.getElementById('sendBtn').disabled = false;
+}
+
+function addMsg(html, role, raw = false) {
+  const msgs = document.getElementById('msgs');
+  const d = document.createElement('div');
+  d.className = `msg ${role}`;
+  const content = raw ? html : html.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+  d.innerHTML = `<div class="msg-av">${role==='bot'?'🏕️':'👤'}</div><div class="msg-body">${content}</div>`;
+  msgs.appendChild(d);
+  msgs.scrollTop = msgs.scrollHeight;
+  return d.querySelector('.msg-body');
+}
+
+function renderPostCard(p) {
+  const msgs = document.getElementById('msgs');
+  const d = document.createElement('div');
+  d.className = 'msg bot';
+  d.innerHTML = `
+    <div class="msg-av">🏕️</div>
+    <div>
+      <div class="post-card">
+        <div class="post-card-head">
+          <div class="insta-av"></div>
+          <div>
+            <div style="font-size:12px;font-weight:600;">${S.sett.brandName||'Ruta Camp'}</div>
+            <div style="font-size:10px;color:var(--muted);">Instagram</div>
+          </div>
+          <span class="type-badge" style="margin-left:auto;">${p.type}</span>
+        </div>
+        <div class="post-card-img">${typeEmoji(p.type)}</div>
+        <div class="post-card-body">
+          ${p.imageDescription ? `<div style="font-size:10px;color:var(--muted);margin-bottom:6px;">📷 ${p.imageDescription}</div>` : ''}
+          <div class="post-caption">${(p.caption||'').replace(/\n/g,'<br>')}</div>
+          <div class="post-hashtags">${p.hashtags||''}</div>
+        </div>
+        <div class="post-card-actions">
+          <button class="btn btn-success btn-sm" onclick="approvePost('${p.id}')">✅ Aprobar</button>
+          <button class="btn btn-ghost btn-sm" onclick="schedulePost('${p.id}')">📅 Programar</button>
+          <button class="btn btn-ghost btn-sm" onclick="nav('pending')">Ver Pendientes</button>
+          <button class="btn btn-danger btn-sm" onclick="deletePost('${p.id}')">🗑️</button>
+        </div>
+      </div>
+    </div>`;
+  msgs.appendChild(d);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+/* ══════════════════════════════════════════════
+   POSTS CRUD
+══════════════════════════════════════════════ */
+function savePost(data) {
+  const p = { id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), ...data };
+  S.posts.unshift(p);
+  DB.set('posts', S.posts);
+  return p;
+}
+
+function persistPosts() { DB.set('posts', S.posts); }
+
+function approvePost(id) {
+  const p = S.posts.find(x => x.id === id);
+  if (!p) return;
+  p.status = 'approved'; p.approvedAt = new Date().toISOString();
+  persistPosts(); updateBadge(); renderPend(); renderDash();
+  toast('Publicación aprobada ✅', 'success');
+}
+
+function deletePost(id) {
+  S.posts = S.posts.filter(x => x.id !== id);
+  persistPosts(); updateBadge(); renderPend(); renderDash();
+  toast('Publicación eliminada', 'success');
+}
+
+function markPublished(id) {
+  const p = S.posts.find(x => x.id === id);
+  if (p) { p.status = 'published'; p.publishedAt = new Date().toISOString(); }
+  persistPosts(); updateBadge(); renderPend();
+  toast('Marcada como publicada', 'success');
+}
+
+function approveAll() {
+  const pend = S.posts.filter(x => x.status === 'pending');
+  if (!pend.length) { toast('No hay pendientes', 'warning'); return; }
+  pend.forEach(p => { p.status = 'approved'; p.approvedAt = new Date().toISOString(); });
+  persistPosts(); updateBadge(); renderPend(); renderDash();
+  toast(`${pend.length} publicaciones aprobadas`, 'success');
+}
+
+/* ══════════════════════════════════════════════
+   BUFFER API
+══════════════════════════════════════════════ */
+async function sendToBuffer(post) {
+  const { bufferToken, bufferProfile } = S.sett;
+  if (!bufferToken || !bufferProfile) return { ok: false };
+  try {
+    const body = new URLSearchParams();
+    body.append('text', `${post.caption||''}\n\n${post.hashtags||''}`);
+    body.append('profile_ids[]', bufferProfile);
+    if (post.scheduledAt) body.append('scheduled_at', String(Math.floor(new Date(post.scheduledAt).getTime()/1000)));
+    const r = await fetch('https://api.bufferapp.com/1/updates/create.json', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${bufferToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      return { ok: true, bufferId: d.updates?.[0]?.id };
+    }
+    return { ok: false };
+  } catch { return { ok: false }; }
+}
+
+async function detectBufferProfiles() {
+  const { bufferToken } = S.sett;
+  if (!bufferToken) { toast('Ingresa tu token de Buffer primero', 'error'); return; }
+  toast('Buscando perfiles…', 'warning');
+  try {
+    const r = await fetch('https://api.bufferapp.com/1/profiles.json', {
+      headers: { 'Authorization': `Bearer ${bufferToken}` }
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const profiles = await r.json();
+    const ig = profiles.filter(p => p.service === 'instagram');
+    if (ig.length) {
+      document.getElementById('sBufferProfile').value = ig[0].id;
+      saveSett();
+      toast(`Perfil encontrado: ${ig[0].formatted_username}`, 'success');
+    } else {
+      toast('No se encontraron perfiles de Instagram en Buffer', 'error');
+    }
+  } catch (e) { toast('Error con Buffer: ' + e.message, 'error'); }
+}
+
+async function syncBuffer() {
+  const approved = S.posts.filter(p => p.status === 'approved');
+  if (!approved.length) { toast('No hay publicaciones aprobadas para sincronizar', 'warning'); return; }
+  let n = 0;
+  for (const p of approved) {
+    const r = await sendToBuffer(p);
+    if (r.ok) { p.status = 'scheduled'; p.bufferId = r.bufferId; n++; }
+  }
+  persistPosts(); renderDash();
+  toast(n ? `${n} publicaciones enviadas a Buffer` : 'No se pudo conectar con Buffer', n ? 'success' : 'error');
+}
+
+/* ══════════════════════════════════════════════
+   SCHEDULE MODAL
+══════════════════════════════════════════════ */
+function schedulePost(id) {
+  const p = S.posts.find(x => x.id === id);
+  if (!p) return;
+  const defDate = (() => {
+    const d = new Date(); d.setDate(d.getDate()+1); d.setHours(9,0,0,0);
+    return d.toISOString().slice(0,16);
+  })();
+  openModal('📅 Programar Publicación', `
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">Selecciona fecha y hora de publicación en Instagram</p>
+    <div class="form-group"><label class="fl">Fecha y hora</label>
+      <input type="datetime-local" class="fi" id="schDate" value="${defDate}">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn btn-primary" onclick="confirmSchedule('${id}')">📅 Enviar a Buffer</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+    </div>
+  `);
+}
+
+async function confirmSchedule(id) {
+  const p = S.posts.find(x => x.id === id);
+  const dt = document.getElementById('schDate')?.value;
+  if (!p || !dt) return;
+  p.scheduledAt = dt; p.status = 'approved';
+  closeModal();
+  const r = await sendToBuffer(p);
+  if (r.ok) { p.status = 'scheduled'; p.bufferId = r.bufferId; toast('Programado en Buffer ✅', 'success'); }
+  else { toast('Guardado localmente (verifica la config de Buffer)', 'warning'); }
+  persistPosts(); renderPend(); updateBadge();
+}
+
+function requestChanges(id) {
+  openModal('✏️ Solicitar Cambios', `
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">¿Qué cambios necesitas?</p>
+    <textarea class="fi" id="chInput" rows="4" placeholder="Ej: Hazlo más energético, cambia el tono, agrega una llamada a la acción..."></textarea>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn btn-primary" onclick="submitChanges('${id}')">Regenerar</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+    </div>
+  `);
+}
+
+function submitChanges(id) {
+  const p = S.posts.find(x => x.id === id);
+  const changes = document.getElementById('chInput')?.value;
+  if (!p || !changes) return;
+  closeModal();
+  nav('create');
+  document.getElementById('ci').value = `Modifica este post.\n\nCaption original:\n"${p.caption}"\n\nCambios solicitados: ${changes}`;
+  document.querySelectorAll('.type-chip').forEach(c => { c.classList.toggle('on', c.dataset.t === p.type); });
+  S.type = p.type;
+}
+
+/* ══════════════════════════════════════════════
+   QUICK GENERATION
+══════════════════════════════════════════════ */
+function quickGen(period) {
+  const prompts = {
+    week:     'Crea 5 publicaciones para Instagram para esta semana laboral (lunes a viernes). Varía entre posts, reels e historias. Temática outdoor y aventura para Ruta Camp.',
+    month:    'Crea 12 publicaciones para Instagram distribuidas durante un mes completo. Incluye posts, reels, historias y carruseles. Estrategia de contenido variada para Ruta Camp.',
+    semester: 'Planifica 24 publicaciones para Instagram para los próximos 6 meses de Ruta Camp. Una estrategia completa con contenido variado y estacional.',
+  };
+  nav('create');
+  const ci = document.getElementById('ci');
+  ci.value = prompts[period];
+  ci.style.height = 'auto'; ci.style.height = ci.scrollHeight + 'px';
+  setTimeout(send, 100);
+}
+
+/* ══════════════════════════════════════════════
+   RENDER: DASHBOARD
+══════════════════════════════════════════════ */
+function renderDash() {
+  const now = new Date();
+  const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay());
+  const thisWeek = S.posts.filter(p => new Date(p.createdAt) >= weekStart);
+  const published = S.posts.filter(p => p.status === 'published');
+  const pending   = S.posts.filter(p => p.status === 'pending');
+
+  document.getElementById('s-week').textContent  = thisWeek.length;
+  document.getElementById('s-pend').textContent  = pending.length;
+  document.getElementById('s-total').textContent = published.length;
+  document.getElementById('s-imgs').textContent  = S.media.length;
+
+  const recent = S.posts.slice(0, 6);
+  document.getElementById('actList').innerHTML = recent.length
+    ? recent.map(p => `
+      <div class="activity-item">
+        <div class="activity-icon">${typeEmoji(p.type)}</div>
+        <div style="flex:1">
+          <div class="activity-text">${(p.caption||'').slice(0,65)}…</div>
+          <div class="activity-meta">${fmtDate(p.createdAt)} · <span class="sdot ${p.status}"></span>${statusLabel(p.status)}</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="nav('${p.status==='pending'?'pending':'published'}')">Ver</button>
+      </div>`).join('')
+    : '<div class="empty"><div class="empty-icon">✨</div><p>¡Crea tu primer contenido!</p><button class="btn btn-primary" onclick="nav(\'create\')">Crear Contenido</button></div>';
+}
+
+/* ══════════════════════════════════════════════
+   RENDER: PENDING
+══════════════════════════════════════════════ */
+function renderPend() {
+  const pend = S.posts.filter(p => p.status === 'pending');
+  const el   = document.getElementById('pendList');
+  if (!pend.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">✅</div><p>No hay publicaciones pendientes</p><button class="btn btn-primary" onclick="nav('create')">+ Crear Contenido</button></div>`;
+    return;
+  }
+  el.innerHTML = pend.map(p => `
+    <div class="appr-card">
+      <div class="appr-head">
+        <span style="font-size:18px;">${typeEmoji(p.type)}</span>
+        <span class="type-badge">${p.type}</span>
+        <span style="font-size:11px;color:var(--muted);">${fmtDate(p.createdAt)}</span>
+        <span style="margin-left:auto;font-size:11px;color:var(--orange);">⏳ Pendiente</span>
+      </div>
+      <div class="appr-body">
+        <div class="appr-thumb">${typeEmoji(p.type)}</div>
+        <div class="appr-content">
+          ${p.imageDescription ? `<div style="font-size:10px;color:var(--muted);margin-bottom:7px;">📷 ${p.imageDescription}</div>` : ''}
+          <div class="appr-caption">${(p.caption||'').replace(/\n/g,'<br>')}</div>
+          <div class="appr-tags">${p.hashtags||''}</div>
+          ${p.scheduleHint ? `<div class="appr-hint">⏰ Sugerido: ${p.scheduleHint}</div>` : ''}
+          <div class="appr-actions">
+            <button class="btn btn-success btn-sm" onclick="approvePost('${p.id}')">✅ Aprobar</button>
+            <button class="btn btn-ghost btn-sm"   onclick="schedulePost('${p.id}')">📅 Programar</button>
+            <button class="btn btn-warning btn-sm" onclick="requestChanges('${p.id}')">✏️ Cambios</button>
+            <button class="btn btn-danger btn-sm"  onclick="deletePost('${p.id}')">🗑️ Rechazar</button>
+          </div>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+/* ══════════════════════════════════════════════
+   RENDER: PUBLISHED
+══════════════════════════════════════════════ */
+function renderPub() {
+  const posts = S.posts.filter(p => p.status !== 'pending');
+  const el = document.getElementById('pubList');
+  if (!posts.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div><p>No hay publicaciones aún</p></div>`;
+    return;
+  }
+  el.innerHTML = posts.map(p => `
+    <div class="appr-card">
+      <div class="appr-head">
+        <span style="font-size:18px;">${typeEmoji(p.type)}</span>
+        <span class="type-badge">${p.type}</span>
+        <span style="font-size:11px;color:var(--muted);">${fmtDate(p.approvedAt || p.createdAt)}</span>
+        <span style="margin-left:auto;font-size:11px;">
+          <span class="sdot ${p.status}"></span>${statusLabel(p.status)}
+        </span>
+      </div>
+      <div class="appr-body">
+        <div class="appr-thumb">${typeEmoji(p.type)}</div>
+        <div class="appr-content">
+          <div class="appr-caption">${(p.caption||'').replace(/\n/g,'<br>')}</div>
+          <div class="appr-tags">${p.hashtags||''}</div>
+          ${p.scheduledAt ? `<div class="appr-hint">📅 Programado: ${fmtDate(p.scheduledAt)}</div>` : ''}
+          ${p.bufferId ? `<div class="appr-hint">Buffer ID: ${p.bufferId}</div>` : ''}
+          <div class="appr-actions">
+            ${p.status === 'approved' ? `<button class="btn btn-ghost btn-sm" onclick="markPublished('${p.id}')">✅ Marcar Publicado</button>` : ''}
+            <button class="btn btn-danger btn-sm" onclick="deletePost('${p.id}')">🗑️</button>
+          </div>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+/* ══════════════════════════════════════════════
+   RENDER: CALENDAR
+══════════════════════════════════════════════ */
+function renderCal() {
+  const d = S.calDate;
+  const y = d.getFullYear(), m = d.getMonth();
+  document.getElementById('calLbl').textContent = d.toLocaleDateString('es', { month:'long', year:'numeric' });
+
+  const firstDay = new Date(y, m, 1).getDay();
+  const daysInMonth = new Date(y, m+1, 0).getDate();
+  const today = new Date();
+
+  const dayNames = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  let html = `<div class="day-names">${dayNames.map(n=>`<div class="dn">${n}</div>`).join('')}</div><div class="cal-grid">`;
+
+  for (let i = 0; i < firstDay; i++) html += '<div class="cal-cell empty"></div>';
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const cellDate = new Date(y, m, day);
+    const isToday = cellDate.toDateString() === today.toDateString();
+    const dayPosts = S.posts.filter(p => {
+      const pd = new Date(p.scheduledAt || p.createdAt || 0);
+      return pd.getFullYear() === y && pd.getMonth() === m && pd.getDate() === day;
+    });
+    html += `<div class="cal-cell ${isToday?'today':''}" onclick="calDayClick('${cellDate.toISOString()}')">
+      <div class="cal-day-num">${day}</div>
+      ${dayPosts.slice(0,3).map(p => `<div class="cal-chip ${p.status}">${typeEmoji(p.type)} ${(p.caption||'').slice(0,12)}…</div>`).join('')}
+      ${dayPosts.length>3 ? `<div style="font-size:9px;color:var(--muted);">+${dayPosts.length-3} más</div>` : ''}
+    </div>`;
+  }
+  html += '</div>';
+  document.getElementById('calWrap').innerHTML = html;
+}
+
+function calPrev()  { S.calDate.setMonth(S.calDate.getMonth()-1); renderCal(); }
+function calNext()  { S.calDate.setMonth(S.calDate.getMonth()+1); renderCal(); }
+function calToday() { S.calDate = new Date(); renderCal(); }
+
+function calDayClick(iso) {
+  const date = new Date(iso);
+  const dayPosts = S.posts.filter(p => {
+    const pd = new Date(p.scheduledAt || p.createdAt || 0);
+    return pd.toDateString() === date.toDateString();
+  });
+  const label = date.toLocaleDateString('es', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+  openModal(`📅 ${label}`, dayPosts.length
+    ? dayPosts.map(p => `
+      <div style="padding:10px;border:1px solid var(--border);border-radius:9px;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+          <span>${typeEmoji(p.type)}</span>
+          <span class="type-badge">${p.type}</span>
+          <span class="sdot ${p.status}"></span>
+          <span style="font-size:10px;color:var(--muted);">${statusLabel(p.status)}</span>
+        </div>
+        <p style="font-size:12px;margin-bottom:6px;">${(p.caption||'').slice(0,80)}…</p>
+        <div style="display:flex;gap:6px;">
+          ${p.status==='pending' ? `<button class="btn btn-success btn-sm" onclick="approvePost('${p.id}');closeModal()">✅</button>` : ''}
+          <button class="btn btn-danger btn-sm" onclick="deletePost('${p.id}');closeModal()">🗑️</button>
+        </div>
+      </div>`).join('')
+    : `<p style="font-size:13px;color:var(--muted);margin-bottom:14px;">No hay publicaciones para este día.</p>
+       <button class="btn btn-primary" onclick="closeModal();nav('create')">+ Crear Contenido</button>`
+  );
+}
+
+/* ══════════════════════════════════════════════
+   MEDIA LIBRARY
+══════════════════════════════════════════════ */
+function renderLib() {
+  const grid = document.getElementById('libGrid');
+  if (!S.media.length) {
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🖼️</div><p>Conecta tu Google Drive para ver tus medios</p><button class="btn btn-primary" onclick="connectDrive()">Conectar Google Drive</button></div>`;
+    return;
+  }
+  grid.innerHTML = S.media.map(f => `
+    <div class="media-card" onclick="toggleMedia(this,'${f.id}')">
+      <div class="media-thumb-box">
+        ${f.thumbnailLink ? `<img src="${f.thumbnailLink}" alt="${f.name}" loading="lazy">` : ''}
+        <span style="position:relative;z-index:1;">${f.mimeType?.startsWith('video') ? '🎬' : '🖼️'}</span>
+      </div>
+      <div class="media-info"><div class="media-name">${f.name}</div></div>
+    </div>`).join('');
+}
+
+function filterLib(type) {
+  const all = DB.get('driveFiles', []);
+  S.media = type === 'all' ? all : all.filter(f => f.mimeType?.startsWith(type));
+  renderLib();
+}
+
+function toggleMedia(el) { el.classList.toggle('selected'); }
+
+/* ── Google Drive ── */
+let gapiReady = false;
+
+async function connectDrive() {
+  const { googleKey, googleClient } = S.sett;
+  if (!googleKey || !googleClient) {
+    toast('Configura las credenciales de Google Drive en ⚙️ Configuración', 'error');
+    nav('settings'); return;
+  }
+  if (!gapiReady) {
+    await loadScript('https://apis.google.com/js/api.js');
+    await new Promise(r => gapi.load('client:auth2', r));
+    gapiReady = true;
+  }
+  try {
+    await gapi.auth2.init({ client_id: googleClient });
+    const auth = gapi.auth2.getAuthInstance();
+    if (!auth.isSignedIn.get()) await auth.signIn({ scope: 'https://www.googleapis.com/auth/drive.readonly' });
+    toast('Conectado a Google Drive ✅', 'success');
+    await loadDrive();
+  } catch (e) { toast('Error con Drive: ' + e.message, 'error'); }
+}
+
+async function loadDrive() {
+  const { googleKey, driveFolder } = S.sett;
+  if (!gapiReady) { toast('Conecta Google Drive primero', 'error'); return; }
+  try {
+    await gapi.client.init({ apiKey: googleKey, discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'] });
+    let q = "(mimeType contains 'image/' or mimeType contains 'video/')";
+    if (driveFolder) q += ` and '${driveFolder}' in parents`;
+    const r = await gapi.client.drive.files.list({ q, fields:'files(id,name,mimeType,size,thumbnailLink)', pageSize:200 });
+    S.media = r.result.files || [];
+    DB.set('driveFiles', S.media);
+    document.getElementById('s-imgs').textContent = S.media.length;
+    renderLib();
+    toast(`${S.media.length} archivos cargados`, 'success');
+  } catch (e) { toast('Error cargando Drive: ' + e.message, 'error'); }
+}
+
+function loadScript(src) {
+  return new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = ok; s.onerror = fail;
+    document.head.appendChild(s);
+  });
+}
+
+/* ══════════════════════════════════════════════
+   UTILITIES
+══════════════════════════════════════════════ */
+function typeEmoji(t) { return { post:'📷', reel:'🎬', story:'📱', carousel:'🔄' }[t] || '📷'; }
+function statusLabel(s) { return { pending:'Pendiente', approved:'Aprobado', published:'Publicado', scheduled:'Programado' }[s] || s; }
+function fmtDate(str) {
+  if (!str) return '';
+  return new Date(str).toLocaleDateString('es', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+}
+function updateBadge() {
+  const n = S.posts.filter(p => p.status === 'pending').length;
+  const el = document.getElementById('pendBadge');
+  el.textContent = n; el.style.display = n ? 'inline' : 'none';
+}
+
+/* ── Toast ── */
+function toast(msg, type = 'info') {
+  const el = document.getElementById('toastEl');
+  el.textContent = msg; el.className = `toast show ${type}`;
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+/* ── Modal ── */
+function openModal(title, content) {
+  document.getElementById('mtitle').textContent = title;
+  document.getElementById('mcontent').innerHTML = content;
+  document.getElementById('overlay').classList.add('show');
+}
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('overlay'))
+    document.getElementById('overlay').classList.remove('show');
+}
+
+/* ══════════════════════════════════════════════
+   INIT
+══════════════════════════════════════════════ */
+function init() {
+  S.posts = DB.get('posts', []);
+  S.media = DB.get('driveFiles', []);
+  loadSett();
+  renderDash();
+  updateBadge();
+  if (!S.sett.claudeKey) setTimeout(() => toast('⚙️ Configura tus API keys para comenzar', 'warning'), 800);
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+name: 📆 Generar Contenido Mensual
+
+on:
+  schedule:
+    - cron: "0 10 1 * *"   # Primer día de cada mes a las 10:00 UTC
+  workflow_dispatch:
+    inputs:
+      period:
+        description: "Período a planificar"
+        required: true
+        default: "month"
+        type: choice
+        options:
+          - month
+          - semester
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install anthropic
+
+      - name: Generar contenido
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          BRAND_NAME:     ${{ vars.BRAND_NAME }}
+          BRAND_TONE:     ${{ vars.BRAND_TONE }}
+          BRAND_TAGS:     ${{ vars.BRAND_TAGS }}
+          PERIOD:         ${{ inputs.period || 'month' }}
+        run: python scripts/generate_content.py
+
+      - name: Commit publicaciones generadas
+        run: |
+          git config user.email "bot@rutacamp.com"
+          git config user.name "Ruta Camp Bot 🤖"
+          git add data/posts.json
+          git diff --staged --quiet || git commit -m "🤖 Contenido mensual generado - $(date '+%Y-%m')"
+          git push

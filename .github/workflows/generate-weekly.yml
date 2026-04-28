@@ -1,0 +1,41 @@
+name: 📅 Generar Contenido Semanal
+
+on:
+  schedule:
+    - cron: "0 10 * * 1"   # Cada lunes a las 10:00 UTC (7:00 AM Chile)
+  workflow_dispatch:        # También se puede ejecutar manualmente
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install anthropic
+
+      - name: Generar contenido semanal
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          BRAND_NAME:     ${{ vars.BRAND_NAME }}
+          BRAND_TONE:     ${{ vars.BRAND_TONE }}
+          BRAND_TAGS:     ${{ vars.BRAND_TAGS }}
+          PERIOD:         "week"
+        run: python scripts/generate_content.py
+
+      - name: Commit publicaciones generadas
+        run: |
+          git config user.email "bot@rutacamp.com"
+          git config user.name "Ruta Camp Bot 🤖"
+          git add data/posts.json
+          git diff --staged --quiet || git commit -m "🤖 Contenido semanal generado - $(date '+%Y-%m-%d')"
+          git push
