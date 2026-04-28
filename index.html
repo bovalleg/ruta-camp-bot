@@ -873,7 +873,12 @@ function renderPostCard(p) {
           </div>
           <span class="type-badge" style="margin-left:auto;">${p.type}</span>
         </div>
-        <div class="post-card-img">${typeEmoji(p.type)}</div>
+        <div class="post-card-img" id="card-img-${p.id}" style="position:relative;cursor:pointer;" onclick="pickImageForPost('${p.id}')">
+          ${p.imageThumbnail
+            ? `<img src="${p.imageThumbnail}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;border-radius:0;">`
+            : `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;">${typeEmoji(p.type)}<span style="font-size:10px;color:rgba(255,255,255,.6);">Toca para seleccionar imagen</span></div>`
+          }
+        </div>
         <div class="post-card-body">
           ${p.imageDescription ? `<div style="font-size:10px;color:var(--muted);margin-bottom:6px;">📷 ${p.imageDescription}</div>` : ''}
           <div class="post-caption">${(p.caption||'').replace(/\n/g,'<br>')}</div>
@@ -881,6 +886,7 @@ function renderPostCard(p) {
         </div>
         <div class="post-card-actions">
           <button class="btn btn-success btn-sm" onclick="approvePost('${p.id}')">✅ Aprobar</button>
+          <button class="btn btn-ghost btn-sm" onclick="pickImageForPost('${p.id}')">🖼️ Imagen</button>
           <button class="btn btn-ghost btn-sm" onclick="schedulePost('${p.id}')">📅 Programar</button>
           <button class="btn btn-ghost btn-sm" onclick="nav('pending')">Ver Pendientes</button>
           <button class="btn btn-danger btn-sm" onclick="deletePost('${p.id}')">🗑️</button>
@@ -1002,6 +1008,59 @@ async function syncBuffer() {
   } else {
     toast('Error al enviar. Verifica tu GitHub Token', 'error');
   }
+}
+
+/* ══════════════════════════════════════════════
+   IMAGE PICKER DESDE GOOGLE DRIVE
+══════════════════════════════════════════════ */
+function pickImageForPost(postId) {
+  if (!S.media.length) {
+    openModal('🖼️ Sin imágenes', `
+      <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">
+        Primero conecta tu Google Drive para ver tus imágenes.
+      </p>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" onclick="closeModal();nav('library')">Ir a Biblioteca</button>
+        <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      </div>`);
+    return;
+  }
+  openModal('🖼️ Seleccionar Imagen de Drive', `
+    <p style="font-size:11px;color:var(--muted);margin-bottom:12px;">
+      ${S.media.length} archivos disponibles — clic para seleccionar
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-height:380px;overflow-y:auto;padding-right:4px;">
+      ${S.media.map(f => `
+        <div onclick="attachImage('${postId}','${f.id}','${(f.thumbnailLink||'').replace(/'/g,"\\'")}','${f.name.replace(/'/g,"\\'")}')"
+             style="cursor:pointer;border-radius:9px;overflow:hidden;border:2px solid var(--border);transition:border-color .15s;"
+             onmouseover="this.style.borderColor='var(--green-300)'"
+             onmouseout="this.style.borderColor='var(--border)'">
+          <div style="aspect-ratio:1;background:var(--bg-1);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:22px;">
+            ${f.thumbnailLink ? `<img src="${f.thumbnailLink}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;" onerror="this.style.display='none'">` : ''}
+            <span style="position:relative;z-index:1;">${f.mimeType?.startsWith('video') ? '🎬' : '🖼️'}</span>
+          </div>
+          <div style="padding:4px 6px;font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--bg-2);">${f.name}</div>
+        </div>`).join('')}
+    </div>
+    <button class="btn btn-ghost btn-sm" style="margin-top:12px;" onclick="closeModal()">Cancelar</button>
+  `);
+}
+
+function attachImage(postId, fileId, thumbnailLink, name) {
+  const p = S.posts.find(x => x.id === postId);
+  if (!p) return;
+  p.imageId        = fileId;
+  p.imageThumbnail = thumbnailLink;
+  p.imageName      = name;
+  persistPosts();
+  closeModal();
+  renderPend();
+  // Si la tarjeta está visible en el chat, actualizar también
+  const chatImg = document.getElementById(`card-img-${postId}`);
+  if (chatImg && thumbnailLink) {
+    chatImg.innerHTML = `<img src="${thumbnailLink}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;border-radius:0;">`;
+  }
+  toast(`✅ "${name}" adjuntada al post`, 'success');
 }
 
 /* ══════════════════════════════════════════════
@@ -1143,7 +1202,12 @@ function renderPend() {
         <span style="margin-left:auto;font-size:11px;color:var(--orange);">⏳ Pendiente</span>
       </div>
       <div class="appr-body">
-        <div class="appr-thumb">${typeEmoji(p.type)}</div>
+        <div class="appr-thumb" onclick="pickImageForPost('${p.id}')" style="cursor:pointer;position:relative;overflow:hidden;" title="Clic para cambiar imagen">
+          ${p.imageThumbnail
+            ? `<img src="${p.imageThumbnail}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;">`
+            : `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;">${typeEmoji(p.type)}<span style="font-size:9px;color:rgba(255,255,255,.5);">+ imagen</span></div>`
+          }
+        </div>
         <div class="appr-content">
           ${p.imageDescription ? `<div style="font-size:10px;color:var(--muted);margin-bottom:7px;">📷 ${p.imageDescription}</div>` : ''}
           <div class="appr-caption">${(p.caption||'').replace(/\n/g,'<br>')}</div>
@@ -1151,6 +1215,7 @@ function renderPend() {
           ${p.scheduleHint ? `<div class="appr-hint">⏰ Sugerido: ${p.scheduleHint}</div>` : ''}
           <div class="appr-actions">
             <button class="btn btn-success btn-sm" onclick="approvePost('${p.id}')">✅ Aprobar</button>
+            <button class="btn btn-ghost btn-sm"   onclick="pickImageForPost('${p.id}')">🖼️ Imagen</button>
             <button class="btn btn-ghost btn-sm"   onclick="schedulePost('${p.id}')">📅 Programar</button>
             <button class="btn btn-ghost btn-sm"   onclick="copyPost('${p.id}')">📋 Copiar</button>
             <button class="btn btn-warning btn-sm" onclick="requestChanges('${p.id}')">✏️ Cambios</button>
