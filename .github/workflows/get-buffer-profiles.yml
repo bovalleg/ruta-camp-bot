@@ -7,72 +7,82 @@ jobs:
   profiles:
     runs-on: ubuntu-latest
     steps:
-      - name: Verificar token y obtener perfiles
+      - name: Obtener perfiles de Buffer
         env:
           BUFFER_TOKEN: ${{ secrets.BUFFER_TOKEN }}
         run: |
           python3 - <<'PYEOF'
           import os, urllib.request, urllib.error, json
 
-          token = os.environ.get("BUFFER_TOKEN", "")
+          token = os.environ.get("BUFFER_TOKEN", "").strip()
 
           if not token:
-              print("❌ ERROR: El secret BUFFER_TOKEN está vacío.")
-              print("   Ve a Settings → Secrets → Actions → New repository secret")
+              print("❌ El secret BUFFER_TOKEN está vacío.")
+              print("   Ve a: Settings → Secrets and variables → Actions → New repository secret")
+              print("   Nombre: BUFFER_TOKEN")
+              print("   Valor: tu access token de Buffer")
               exit(1)
 
-          print(f"Token encontrado: {token[:6]}...{token[-4:]} (longitud: {len(token)})")
+          print(f"Token: {token[:8]}...{token[-4:]} ({len(token)} caracteres)\n")
 
-          # Buffer API acepta el token como query param o como Bearer header
-          # Probamos ambos formatos
-          urls_to_try = [
-              f"https://api.bufferapp.com/1/profiles.json?access_token={token}",
-              "https://api.bufferapp.com/1/profiles.json",
-          ]
-          headers_list = [
-              {},
-              {"Authorization": f"Bearer {token}"},
+          # Buffer API v1 - probamos 2 métodos de autenticación
+          tests = [
+              {
+                  "label": "Bearer header",
+                  "url": "https://api.bufferapp.com/1/profiles.json",
+                  "headers": {"Authorization": f"Bearer {token}"}
+              },
+              {
+                  "label": "access_token query param",
+                  "url": f"https://api.bufferapp.com/1/profiles.json?access_token={token}",
+                  "headers": {}
+              },
           ]
 
-          for url, headers in zip(urls_to_try, headers_list):
-              method = "query param" if "access_token" in url else "Bearer header"
-              print(f"\nProbando con {method}...")
+          for test in tests:
+              print(f"Probando: {test['label']}...")
               try:
-                  req = urllib.request.Request(url, headers=headers)
-                  with urllib.request.urlopen(req) as resp:
-                      profiles = json.loads(resp.read())
-                      print(f"✅ Éxito con {method}!\n")
-                      print("========== TUS PERFILES EN BUFFER ==========\n")
-                      for p in profiles:
-                          print(f"Red:      {p.get('service','?').upper()}")
-                          print(f"Usuario:  @{p.get('formatted_username','?')}")
-                          print(f"ID:       {p.get('id','?')}   ← COPIA ESTE ID")
-                          print("-" * 45)
+                  req = urllib.request.Request(test["url"], headers=test["headers"])
+                  with urllib.request.urlopen(req, timeout=15) as resp:
+                      body = resp.read().decode()
+                      profiles = json.loads(body)
 
-                      # Write summary
-                      summary_file = os.environ.get("GITHUB_STEP_SUMMARY", "")
-                      if summary_file:
-                          with open(summary_file, "a") as f:
-                              f.write("## ✅ Perfiles de Buffer encontrados\n\n")
-                              f.write("| Red | Usuario | **ID — pégalo en el bot** |\n")
-                              f.write("|-----|---------|---------------------------|\n")
+                      print(f"✅ ÉXITO con {test['label']}!\n")
+                      print("=" * 50)
+                      for p in profiles:
+                          print(f"  Red:     {p.get('service','?').upper()}")
+                          print(f"  Usuario: @{p.get('formatted_username','?')}")
+                          print(f"  ID:      {p.get('id','?')}  ← USA ESTE")
+                          print("-" * 50)
+
+                      summary = os.environ.get("GITHUB_STEP_SUMMARY","")
+                      if summary:
+                          with open(summary,"a") as f:
+                              f.write("## ✅ Perfiles de Buffer\n\n")
+                              f.write("| Red | Usuario | ID — pégalo en el bot |\n")
+                              f.write("|-----|---------|----------------------|\n")
                               for p in profiles:
                                   f.write(f"| {p.get('service','?')} | @{p.get('formatted_username','?')} | `{p.get('id','?')}` |\n")
-                              f.write("\n> Copia el ID de Instagram y pégalo en:\n")
-                              f.write("> 1. GitHub Secrets → `BUFFER_PROFILE_ID`\n")
-                              f.write("> 2. ⚙️ Configuración del bot → 'ID de Perfil de Instagram'\n")
+                              f.write("\n**Pasos:**\n")
+                              f.write("1. Copia el ID de Instagram\n")
+                              f.write("2. Agrégalo en Secrets: `BUFFER_PROFILE_ID`\n")
+                              f.write("3. Pégalo en ⚙️ Configuración del bot → 'ID de Perfil'\n")
                       exit(0)
+
               except urllib.error.HTTPError as e:
                   body = e.read().decode()
-                  print(f"   Error HTTP {e.code}: {e.reason}")
-                  print(f"   Respuesta: {body[:300]}")
+                  print(f"  HTTP {e.code} {e.reason}")
+                  print(f"  Respuesta de Buffer: {body}\n")
               except Exception as ex:
-                  print(f"   Error: {ex}")
+                  print(f"  Error: {ex}\n")
 
           print("\n❌ Ningún método funcionó.")
-          print("\nPosibles causas:")
-          print("  1. El token de Buffer es incorrecto o expiró")
-          print("  2. El token debe ser el 'Access Token' de Buffer (no el Client Secret)")
-          print("  3. Genera un nuevo token en: buffer.com → settings → apps")
+          print("\n¿Qué hacer?")
+          print("  1. Verifica que el token sea el ACCESS TOKEN de Buffer")
+          print("     (no el Client ID ni el Client Secret)")
+          print("  2. Ve a: publish.buffer.com → tu foto → Settings → API")
+          print("     O: bufferapp.com/developers/apps → tu app → Access Token")
+          print("  3. Si tu plan no incluye API, considera usar el botón")
+          print("     'Copiar contenido' del bot para pegar manualmente en Buffer")
           exit(1)
           PYEOF

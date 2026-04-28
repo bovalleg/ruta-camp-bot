@@ -1005,6 +1005,25 @@ async function syncBuffer() {
 }
 
 /* ══════════════════════════════════════════════
+   COPY TO CLIPBOARD (respaldo si Buffer no funciona)
+══════════════════════════════════════════════ */
+function copyPost(id) {
+  const p = S.posts.find(x => x.id === id);
+  if (!p) return;
+  const text = `${p.caption || ''}\n\n${p.hashtags || ''}`.trim();
+  navigator.clipboard.writeText(text).then(() => {
+    toast('📋 Contenido copiado — pégalo en Buffer o Instagram', 'success');
+  }).catch(() => {
+    // fallback para browsers sin clipboard API
+    openModal('📋 Copiar Contenido', `
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">Selecciona todo y copia (Ctrl+A, Ctrl+C):</p>
+      <textarea class="fi" rows="8" onclick="this.select()" style="font-size:12px;">${(p.caption||'').replace(/</g,'&lt;')}\n\n${p.hashtags||''}</textarea>
+      <button class="btn btn-ghost" style="margin-top:10px;" onclick="closeModal()">Cerrar</button>
+    `);
+  });
+}
+
+/* ══════════════════════════════════════════════
    SCHEDULE MODAL
 ══════════════════════════════════════════════ */
 function schedulePost(id) {
@@ -1133,6 +1152,7 @@ function renderPend() {
           <div class="appr-actions">
             <button class="btn btn-success btn-sm" onclick="approvePost('${p.id}')">✅ Aprobar</button>
             <button class="btn btn-ghost btn-sm"   onclick="schedulePost('${p.id}')">📅 Programar</button>
+            <button class="btn btn-ghost btn-sm"   onclick="copyPost('${p.id}')">📋 Copiar</button>
             <button class="btn btn-warning btn-sm" onclick="requestChanges('${p.id}')">✏️ Cambios</button>
             <button class="btn btn-danger btn-sm"  onclick="deletePost('${p.id}')">🗑️ Rechazar</button>
           </div>
@@ -1269,51 +1289,94 @@ function filterLib(type) {
 
 function toggleMedia(el) { el.classList.toggle('selected'); }
 
-/* ── Google Drive ── */
-let gapiReady = false;
-
-async function connectDrive() {
-  const { googleKey, googleClient } = S.sett;
-  if (!googleKey || !googleClient) {
-    toast('Configura las credenciales de Google Drive en ⚙️ Configuración', 'error');
-    nav('settings'); return;
-  }
-  if (!gapiReady) {
-    await loadScript('https://apis.google.com/js/api.js');
-    await new Promise(r => gapi.load('client:auth2', r));
-    gapiReady = true;
-  }
-  try {
-    await gapi.auth2.init({ client_id: googleClient });
-    const auth = gapi.auth2.getAuthInstance();
-    if (!auth.isSignedIn.get()) await auth.signIn({ scope: 'https://www.googleapis.com/auth/drive.readonly' });
-    toast('Conectado a Google Drive ✅', 'success');
-    await loadDrive();
-  } catch (e) { toast('Error con Drive: ' + e.message, 'error'); }
-}
-
-async function loadDrive() {
-  const { googleKey, driveFolder } = S.sett;
-  if (!gapiReady) { toast('Conecta Google Drive primero', 'error'); return; }
-  try {
-    await gapi.client.init({ apiKey: googleKey, discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'] });
-    let q = "(mimeType contains 'image/' or mimeType contains 'video/')";
-    if (driveFolder) q += ` and '${driveFolder}' in parents`;
-    const r = await gapi.client.drive.files.list({ q, fields:'files(id,name,mimeType,size,thumbnailLink)', pageSize:200 });
-    S.media = r.result.files || [];
-    DB.set('driveFiles', S.media);
-    document.getElementById('s-imgs').textContent = S.media.length;
-    renderLib();
-    toast(`${S.media.length} archivos cargados`, 'success');
-  } catch (e) { toast('Error cargando Drive: ' + e.message, 'error'); }
-}
+/* ── Google Drive (usa Google Identity Services — nuevo estándar 2024) ── */
+let _gapiInited = false;
+let _tokenClient = null;
 
 function loadScript(src) {
   return new Promise((ok, fail) => {
+    if (document.querySelector(`script[src="${src}"]`)) { ok(); return; }
     const s = document.createElement('script');
     s.src = src; s.onload = ok; s.onerror = fail;
     document.head.appendChild(s);
   });
+}
+
+async function _ensureGapi(apiKey) {
+  await loadScript('https://apis.google.com/js/api.js');
+  if (!_gapiInited) {
+    await new Promise(r => gapi.load('client', r));
+    _gapiInited = true;
+  }
+  await gapi.client.init({
+    apiKey,
+    discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+  });
+}
+
+async function _ensureGis() {
+  if (window.google?.accounts?.oauth2) return;
+  await loadScript('https://accounts.google.com/gsi/client');
+  await new Promise((resolve, reject) => {
+    const t = setInterval(() => { if (window.google?.accounts?.oauth2) { clearInterval(t); resolve(); } }, 150);
+    setTimeout(() => { clearInterval(t); reject(new Error('GIS tardó demasiado en cargar')); }, 8000);
+  });
+}
+
+async function connectDrive() {
+  const { googleKey, googleClient } = S.sett;
+  if (!googleKey || !googleClient) {
+    toast('Configura Google API Key y Client ID en ⚙️ Configuración', 'error');
+    nav('settings'); return;
+  }
+  toast('Cargando librerías de Google…', 'warning');
+  try {
+    await Promise.all([_ensureGapi(googleKey), _ensureGis()]);
+
+    _tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: googleClient,
+      scope: 'https://www.googleapis.com/auth/drive.readonly',
+      callback: async (resp) => {
+        if (resp.error) {
+          toast('Error Google OAuth: ' + resp.error, 'error');
+          console.error('OAuth error:', resp);
+          return;
+        }
+        toast('Google Drive conectado ✅', 'success');
+        await loadDrive();
+      },
+    });
+
+    const existing = gapi.client.getToken();
+    _tokenClient.requestAccessToken({ prompt: existing ? '' : 'consent' });
+  } catch (e) {
+    toast('Error: ' + (e.message || e.details || 'No se pudo conectar con Google'), 'error');
+    console.error('Drive connect error:', e);
+  }
+}
+
+async function loadDrive() {
+  const { driveFolder } = S.sett;
+  if (!_gapiInited) { await connectDrive(); return; }
+  try {
+    let q = "(mimeType contains 'image/' or mimeType contains 'video/')";
+    if (driveFolder) q += ` and '${driveFolder}' in parents`;
+    const r = await gapi.client.drive.files.list({
+      q,
+      fields: 'files(id,name,mimeType,size,thumbnailLink)',
+      pageSize: 200,
+      orderBy: 'modifiedTime desc',
+    });
+    S.media = r.result.files || [];
+    DB.set('driveFiles', S.media);
+    document.getElementById('s-imgs').textContent = S.media.length;
+    renderLib();
+    toast(`${S.media.length} archivos cargados desde Drive ✅`, 'success');
+  } catch (e) {
+    const msg = e.result?.error?.message || e.message || 'Error desconocido';
+    toast('Error cargando Drive: ' + msg, 'error');
+    console.error('Drive load error:', e);
+  }
 }
 
 /* ══════════════════════════════════════════════
