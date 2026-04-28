@@ -1,0 +1,55 @@
+name: 🔍 Ver Perfiles de Buffer
+
+on:
+  workflow_dispatch:
+
+jobs:
+  profiles:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Obtener perfiles
+        env:
+          BUFFER_TOKEN: ${{ secrets.BUFFER_TOKEN }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, urllib.request, json
+
+          token = os.environ["BUFFER_TOKEN"]
+          req   = urllib.request.Request(
+              "https://api.bufferapp.com/1/profiles.json",
+              headers={"Authorization": f"Bearer {token}"}
+          )
+          with urllib.request.urlopen(req) as resp:
+              profiles = json.loads(resp.read())
+
+          print("\n========== TUS PERFILES EN BUFFER ==========\n")
+          for p in profiles:
+              print(f"Red:      {p.get('service','?').upper()}")
+              print(f"Usuario:  @{p.get('formatted_username','?')}")
+              print(f"ID:       {p.get('id','?')}   ← USA ESTE ID")
+              print("-" * 45)
+          PYEOF
+
+      - name: Resumen con IDs
+        env:
+          BUFFER_TOKEN: ${{ secrets.BUFFER_TOKEN }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, urllib.request, json
+
+          token = os.environ["BUFFER_TOKEN"]
+          req   = urllib.request.Request(
+              "https://api.bufferapp.com/1/profiles.json",
+              headers={"Authorization": f"Bearer {token}"}
+          )
+          with urllib.request.urlopen(req) as resp:
+              profiles = json.loads(resp.read())
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("## 🔍 Tus Perfiles de Buffer\n\n")
+              f.write("| Red | Usuario | ID (usa este en el bot) |\n")
+              f.write("|-----|---------|------------------------|\n")
+              for p in profiles:
+                  f.write(f"| {p.get('service','?')} | @{p.get('formatted_username','?')} | `{p.get('id','?')}` |\n")
+              f.write("\n> Copia el ID de Instagram y pégalo en ⚙️ Configuración del bot\n")
+          PYEOF

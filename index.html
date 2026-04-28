@@ -553,17 +553,22 @@
       </div>
 
       <div class="settings-section">
-        <h2>📤 Buffer</h2>
-        <div class="form-group">
-          <label class="fl">Token de Acceso</label>
-          <input type="password" class="fi" id="sBufferToken" placeholder="Token de Buffer..." oninput="saveSett()">
+        <h2>📤 Buffer + GitHub</h2>
+        <div style="background:rgba(116,198,157,.08);border:1px solid rgba(116,198,157,.2);border-radius:9px;padding:11px 14px;margin-bottom:14px;font-size:12px;line-height:1.6;color:var(--green-300);">
+          ℹ️ Buffer bloquea llamadas directas desde el browser. El bot usa <strong>GitHub Actions</strong> como intermediario seguro. Solo necesitas un GitHub Token con permiso <code>workflow</code>.
         </div>
         <div class="form-group">
-          <label class="fl">ID de Perfil de Instagram</label>
-          <input type="text" class="fi" id="sBufferProfile" placeholder="ID del perfil" oninput="saveSett()">
+          <label class="fl">GitHub Personal Access Token (scope: workflow)</label>
+          <input type="password" class="fi" id="sGithubToken" placeholder="ghp_..." oninput="saveSett()">
+          <div class="fi-hint">Crea uno en: github.com → Settings → Developer settings → Personal access tokens → Tokens (classic) → scope: <strong>workflow</strong></div>
+        </div>
+        <div class="form-group">
+          <label class="fl">ID de Perfil de Instagram en Buffer</label>
+          <input type="text" class="fi" id="sBufferProfile" placeholder="ID numérico del perfil en Buffer" oninput="saveSett()">
           <div class="fi-hint">
-            <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="detectBufferProfiles()">🔍 Detectar Perfiles Automáticamente</button>
+            <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="detectBufferProfiles()">🔍 Ver mis perfiles de Buffer (abre GitHub Actions)</button>
           </div>
+          <div class="fi-hint" style="margin-top:6px;">Primero agrega <code>BUFFER_TOKEN</code> y <code>BUFFER_PROFILE_ID</code> en GitHub → Settings → Secrets → Actions</div>
         </div>
       </div>
 
@@ -659,7 +664,7 @@ function loadSett() {
   S.sett = s;
   const map = {
     sClaudeKey: 'claudeKey', sClaudeModel: 'claudeModel',
-    sBufferToken: 'bufferToken', sBufferProfile: 'bufferProfile',
+    sBufferProfile: 'bufferProfile', sGithubToken: 'githubToken',
     sGoogleKey: 'googleKey', sGoogleClient: 'googleClient', sDriveFolder: 'driveFolder',
     sBrandName: 'brandName', sBrandTone: 'brandTone', sBrandTags: 'brandTags', sLang: 'lang',
   };
@@ -673,8 +678,8 @@ function saveSett() {
   const s = {
     claudeKey:     document.getElementById('sClaudeKey').value,
     claudeModel:   document.getElementById('sClaudeModel').value || 'claude-sonnet-4-6',
-    bufferToken:   document.getElementById('sBufferToken').value,
     bufferProfile: document.getElementById('sBufferProfile').value,
+    githubToken:   document.getElementById('sGithubToken').value,
     googleKey:     document.getElementById('sGoogleKey').value,
     googleClient:  document.getElementById('sGoogleClient').value,
     driveFolder:   document.getElementById('sDriveFolder').value,
@@ -928,60 +933,75 @@ function approveAll() {
 }
 
 /* ══════════════════════════════════════════════
-   BUFFER API
+   BUFFER VIA GITHUB ACTIONS
+   (Buffer API bloquea CORS desde el browser,
+    así que usamos GitHub Actions como proxy seguro)
 ══════════════════════════════════════════════ */
-async function sendToBuffer(post) {
-  const { bufferToken, bufferProfile } = S.sett;
-  if (!bufferToken || !bufferProfile) return { ok: false };
-  try {
-    const body = new URLSearchParams();
-    body.append('text', `${post.caption||''}\n\n${post.hashtags||''}`);
-    body.append('profile_ids[]', bufferProfile);
-    if (post.scheduledAt) body.append('scheduled_at', String(Math.floor(new Date(post.scheduledAt).getTime()/1000)));
-    const r = await fetch('https://api.bufferapp.com/1/updates/create.json', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${bufferToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-    });
-    if (r.ok) {
-      const d = await r.json();
-      return { ok: true, bufferId: d.updates?.[0]?.id };
-    }
+const GH_REPO = 'bovalleg/ruta-camp-bot';
+
+async function dispatchWorkflow(workflow, inputs = {}) {
+  const { githubToken } = S.sett;
+  if (!githubToken) {
+    toast('Configura tu GitHub Token en ⚙️ Configuración', 'error');
+    nav('settings');
     return { ok: false };
-  } catch { return { ok: false }; }
+  }
+  try {
+    const r = await fetch(`https://api.github.com/repos/${GH_REPO}/actions/workflows/${workflow}/dispatches`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${githubToken}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ref: 'main', inputs }),
+    });
+    return { ok: r.status === 204 };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function sendToBuffer(post) {
+  const r = await dispatchWorkflow('send-to-buffer.yml', {
+    caption:      post.caption   || '',
+    hashtags:     post.hashtags  || '',
+    scheduled_at: post.scheduledAt ? String(Math.floor(new Date(post.scheduledAt).getTime()/1000)) : '',
+    post_type:    post.type      || 'post',
+  });
+  return r;
 }
 
 async function detectBufferProfiles() {
-  const { bufferToken } = S.sett;
-  if (!bufferToken) { toast('Ingresa tu token de Buffer primero', 'error'); return; }
-  toast('Buscando perfiles…', 'warning');
-  try {
-    const r = await fetch('https://api.bufferapp.com/1/profiles.json', {
-      headers: { 'Authorization': `Bearer ${bufferToken}` }
-    });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const profiles = await r.json();
-    const ig = profiles.filter(p => p.service === 'instagram');
-    if (ig.length) {
-      document.getElementById('sBufferProfile').value = ig[0].id;
-      saveSett();
-      toast(`Perfil encontrado: ${ig[0].formatted_username}`, 'success');
-    } else {
-      toast('No se encontraron perfiles de Instagram en Buffer', 'error');
-    }
-  } catch (e) { toast('Error con Buffer: ' + e.message, 'error'); }
+  const { githubToken } = S.sett;
+  if (!githubToken) { toast('Configura tu GitHub Token primero', 'error'); nav('settings'); return; }
+  toast('Lanzando acción en GitHub…', 'warning');
+  const r = await dispatchWorkflow('get-buffer-profiles.yml');
+  if (r.ok) {
+    toast('✅ Acción lanzada — abre GitHub Actions para ver los IDs', 'success');
+    setTimeout(() => window.open(`https://github.com/${GH_REPO}/actions`, '_blank'), 1000);
+  } else {
+    toast('Error al lanzar la acción. Verifica tu GitHub Token', 'error');
+  }
 }
 
 async function syncBuffer() {
   const approved = S.posts.filter(p => p.status === 'approved');
   if (!approved.length) { toast('No hay publicaciones aprobadas para sincronizar', 'warning'); return; }
+  toast(`Enviando ${approved.length} publicación(es) a Buffer…`, 'warning');
   let n = 0;
   for (const p of approved) {
     const r = await sendToBuffer(p);
-    if (r.ok) { p.status = 'scheduled'; p.bufferId = r.bufferId; n++; }
+    if (r.ok) { p.status = 'scheduled'; n++; }
+    await new Promise(res => setTimeout(res, 500)); // pequeña pausa entre llamadas
   }
   persistPosts(); renderDash();
-  toast(n ? `${n} publicaciones enviadas a Buffer` : 'No se pudo conectar con Buffer', n ? 'success' : 'error');
+  if (n > 0) {
+    toast(`${n} publicaciones enviadas a Buffer vía GitHub Actions ✅`, 'success');
+    setTimeout(() => window.open(`https://github.com/${GH_REPO}/actions`, '_blank'), 1500);
+  } else {
+    toast('Error al enviar. Verifica tu GitHub Token', 'error');
+  }
 }
 
 /* ══════════════════════════════════════════════

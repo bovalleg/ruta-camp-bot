@@ -1,0 +1,77 @@
+name: 📤 Enviar Post a Buffer
+
+on:
+  workflow_dispatch:
+    inputs:
+      caption:
+        description: "Texto del post"
+        required: true
+      hashtags:
+        description: "Hashtags"
+        required: false
+        default: ""
+      scheduled_at:
+        description: "Timestamp Unix de publicación (vacío = próximo slot)"
+        required: false
+        default: ""
+      post_type:
+        description: "Tipo de contenido"
+        required: false
+        default: "post"
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enviar a Buffer
+        env:
+          BUFFER_TOKEN:   ${{ secrets.BUFFER_TOKEN }}
+          BUFFER_PROFILE: ${{ secrets.BUFFER_PROFILE_ID }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, urllib.request, urllib.parse, json
+
+          token    = os.environ["BUFFER_TOKEN"]
+          profile  = os.environ["BUFFER_PROFILE"]
+          caption  = """${{ inputs.caption }}"""
+          hashtags = """${{ inputs.hashtags }}"""
+          sched    = "${{ inputs.scheduled_at }}"
+
+          text = caption.strip()
+          if hashtags.strip():
+              text += "\n\n" + hashtags.strip()
+
+          params = {
+              "text":            text,
+              "profile_ids[]":   profile,
+          }
+          if sched:
+              params["scheduled_at"] = sched
+
+          data = urllib.parse.urlencode(params).encode()
+          req  = urllib.request.Request(
+              "https://api.bufferapp.com/1/updates/create.json",
+              data=data,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/x-www-form-urlencoded",
+              },
+              method="POST"
+          )
+          with urllib.request.urlopen(req) as resp:
+              result = json.loads(resp.read())
+              print(json.dumps(result, indent=2, ensure_ascii=False))
+              updates = result.get("updates", [])
+              if updates:
+                  print(f"\n✅ Post enviado a Buffer. ID: {updates[0].get('id')}")
+              else:
+                  print("\n✅ Respuesta recibida de Buffer")
+          PYEOF
+
+      - name: Resumen
+        run: |
+          echo "## 📤 Post enviado a Buffer" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tipo:** ${{ inputs.post_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Caption:** ${{ inputs.caption }}" | head -c 200 >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Hashtags:** ${{ inputs.hashtags }}" >> $GITHUB_STEP_SUMMARY
