@@ -334,6 +334,28 @@
       -webkit-box-orient: vertical;
     }
 
+    /* ─── APPR THUMB: height fija para que nunca colapse ─── */
+    .appr-thumb {
+      min-height: 140px !important;
+    }
+
+    /* ─── LIBRARY GRID: columnas más grandes, thumbnails cuadrados ─── */
+    .lib-grid {
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important;
+    }
+    .media-thumb-box {
+      aspect-ratio: unset !important;
+      height: 150px !important;
+      min-height: 150px !important;
+    }
+    .media-thumb-box img {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+      position: absolute !important;
+      inset: 0 !important;
+    }
+
     /* ─── STATUS DOTS ─── */
     .sdot {
       display: inline-block; width: 6px; height: 6px;
@@ -1057,7 +1079,7 @@ function _pickerGrid(files, postId) {
   }).join('');
 }
 
-function pickImageForPost(postId) {
+async function pickImageForPost(postId) {
   if (!S.media.length) {
     openModal('🖼️ Sin imágenes', `
       <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Primero conecta tu Google Drive para ver tus imágenes.</p>
@@ -1066,6 +1088,11 @@ function pickImageForPost(postId) {
         <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       </div>`);
     return;
+  }
+
+  // Load folders on demand if not yet populated (e.g. after page reload)
+  if (!S.folders.length && _gapiInited) {
+    await loadDriveFolders();
   }
 
   // Tabs de carpeta para el picker
