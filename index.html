@@ -321,6 +321,19 @@
     }
     .empty-icon { font-size: 52px; }
 
+    /* ─── LIBRARY ACTIVE BTN ─── */
+    .lib-type-btn.active, .lib-folder-btn.active {
+      background: rgba(64,145,108,.2); border-color: var(--green-500); color: var(--green-300);
+    }
+
+    /* ─── CARD CAPTION CLAMP ─── */
+    .appr-caption {
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 4;
+      -webkit-box-orient: vertical;
+    }
+
     /* ─── STATUS DOTS ─── */
     .sdot {
       display: inline-block; width: 6px; height: 6px;
@@ -512,10 +525,13 @@
         <button class="btn btn-primary btn-sm" onclick="connectDrive()">Conectar Drive</button>
       </div>
     </div>
-    <div class="lib-filter">
-      <button class="btn btn-ghost btn-sm" onclick="filterLib('all')">Todos</button>
-      <button class="btn btn-ghost btn-sm" onclick="filterLib('image')">🖼️ Imágenes</button>
-      <button class="btn btn-ghost btn-sm" onclick="filterLib('video')">🎬 Videos</button>
+    <div class="lib-filter" style="flex-direction:column;gap:8px;align-items:flex-start;">
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-ghost btn-sm lib-type-btn active" onclick="filterLib('all',this)">Todos</button>
+        <button class="btn btn-ghost btn-sm lib-type-btn" onclick="filterLib('image',this)">🖼️ Imágenes</button>
+        <button class="btn btn-ghost btn-sm lib-type-btn" onclick="filterLib('video',this)">🎬 Videos</button>
+      </div>
+      <div id="folderTabs" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
     </div>
     <div class="lib-grid" id="libGrid">
       <div class="empty" style="grid-column:1/-1">
@@ -639,13 +655,16 @@
    STATE
 ══════════════════════════════════════════════ */
 const S = {
-  view:       'dashboard',
-  type:       'post',
-  posts:      [],
-  media:      [],
-  calDate:    new Date(),
-  busy:       false,
-  sett:       {},
+  view:         'dashboard',
+  type:         'post',
+  posts:        [],
+  media:        [],
+  folders:      [],
+  activeFolder: null,
+  libType:      'all',
+  calDate:      new Date(),
+  busy:         false,
+  sett:         {},
 };
 
 /* ══════════════════════════════════════════════
@@ -826,12 +845,20 @@ async function send() {
     loadEl.remove();
 
     if (data?.batch && Array.isArray(data.posts)) {
-      data.posts.forEach(p => savePost({ ...p, status:'pending', createdAt: new Date().toISOString() }));
-      addMsg(`✅ Generé <strong>${data.posts.length} publicaciones</strong> y las agregué a Pendientes para tu revisión.`, 'bot');
-      toast(`${data.posts.length} publicaciones creadas`, 'success');
+      const saved = data.posts.map(p => {
+        const post = savePost({ ...p, status:'pending', createdAt: new Date().toISOString() });
+        suggestImageForPost(post);
+        return post;
+      });
+      persistPosts();
+      const withImg = saved.filter(p => p.imageThumbnail).length;
+      addMsg(`✅ Generé <strong>${saved.length} publicaciones</strong>${withImg ? ` — se sugirió imagen a ${withImg}` : ''}. Ve a <strong>Pendientes</strong> para revisarlas.`, 'bot');
+      toast(`${saved.length} publicaciones creadas`, 'success');
     } else if (data) {
       const post = savePost({ ...data, type: data.type || S.type, status:'pending', createdAt: new Date().toISOString() });
-      addMsg('✅ Publicación creada y agregada a <strong>Pendientes</strong> para que la apruebes o modifiques.', 'bot');
+      suggestImageForPost(post);
+      persistPosts();
+      addMsg(`✅ Publicación creada${post.imageSuggested ? ' con imagen sugerida de tu Drive' : ''}. Revísala en <strong>Pendientes</strong>.`, 'bot');
       renderPostCard(post);
     } else {
       addMsg(text2, 'bot');
@@ -1013,37 +1040,75 @@ async function syncBuffer() {
 /* ══════════════════════════════════════════════
    IMAGE PICKER DESDE GOOGLE DRIVE
 ══════════════════════════════════════════════ */
+function _pickerGrid(files, postId) {
+  if (!files.length) return '<p style="color:var(--muted);font-size:12px;padding:20px 0;text-align:center;">Sin archivos en esta carpeta</p>';
+  return files.map(f => {
+    const thumb  = (f.thumbnailLink||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const fname  = f.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return `<div onclick="attachImage('${postId}','${f.id}','${thumb}','${fname}')"
+         style="cursor:pointer;border-radius:9px;overflow:hidden;border:2px solid var(--border);transition:border-color .15s;"
+         onmouseover="this.style.borderColor='var(--green-300)'" onmouseout="this.style.borderColor='var(--border)'">
+      <div style="aspect-ratio:1;background:var(--bg-1);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:22px;">
+        ${f.thumbnailLink?`<img src="${f.thumbnailLink}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;" onerror="this.style.display='none'">` : ''}
+        <span style="position:relative;z-index:1;">${f.mimeType?.startsWith('video')?'🎬':'🖼️'}</span>
+      </div>
+      <div style="padding:4px 6px;font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--bg-2);">${f.name}</div>
+    </div>`;
+  }).join('');
+}
+
 function pickImageForPost(postId) {
   if (!S.media.length) {
     openModal('🖼️ Sin imágenes', `
-      <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">
-        Primero conecta tu Google Drive para ver tus imágenes.
-      </p>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Primero conecta tu Google Drive para ver tus imágenes.</p>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-primary" onclick="closeModal();nav('library')">Ir a Biblioteca</button>
         <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       </div>`);
     return;
   }
-  openModal('🖼️ Seleccionar Imagen de Drive', `
-    <p style="font-size:11px;color:var(--muted);margin-bottom:12px;">
-      ${S.media.length} archivos disponibles — clic para seleccionar
-    </p>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-height:380px;overflow-y:auto;padding-right:4px;">
-      ${S.media.map(f => `
-        <div onclick="attachImage('${postId}','${f.id}','${(f.thumbnailLink||'').replace(/'/g,"\\'")}','${f.name.replace(/'/g,"\\'")}')"
-             style="cursor:pointer;border-radius:9px;overflow:hidden;border:2px solid var(--border);transition:border-color .15s;"
-             onmouseover="this.style.borderColor='var(--green-300)'"
-             onmouseout="this.style.borderColor='var(--border)'">
-          <div style="aspect-ratio:1;background:var(--bg-1);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:22px;">
-            ${f.thumbnailLink ? `<img src="${f.thumbnailLink}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;" onerror="this.style.display='none'">` : ''}
-            <span style="position:relative;z-index:1;">${f.mimeType?.startsWith('video') ? '🎬' : '🖼️'}</span>
-          </div>
-          <div style="padding:4px 6px;font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--bg-2);">${f.name}</div>
-        </div>`).join('')}
+
+  // Tabs de carpeta para el picker
+  const folderTabs = [
+    `<button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="refreshPickerGrid('${postId}',null,this)">📁 Todas</button>`,
+    ...S.folders.map(f =>
+      `<button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="refreshPickerGrid('${postId}','${f.id}',this)" title="${f.name}">
+        📁 ${f.name.length>14?f.name.slice(0,12)+'…':f.name}
+      </button>`
+    )
+  ].join('');
+
+  openModal('🖼️ Seleccionar Imagen', `
+    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);">
+      ${folderTabs}
     </div>
-    <button class="btn btn-ghost btn-sm" style="margin-top:12px;" onclick="closeModal()">Cancelar</button>
+    <div id="pickerGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-height:360px;overflow-y:auto;padding-right:2px;">
+      ${_pickerGrid(S.media, postId)}
+    </div>
+    <button class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="closeModal()">Cancelar</button>
   `);
+}
+
+async function refreshPickerGrid(postId, folderId, btn) {
+  // Highlight tab activo
+  btn.closest('div').querySelectorAll('button').forEach(b => b.style.color='');
+  btn.style.color = 'var(--green-300)';
+
+  const grid = document.getElementById('pickerGrid');
+  grid.innerHTML = '<p style="color:var(--muted);font-size:12px;padding:20px 0;text-align:center;">Cargando…</p>';
+
+  let files = S.media;
+  if (folderId && _gapiInited) {
+    try {
+      const r = await gapi.client.drive.files.list({
+        q: `(mimeType contains 'image/' or mimeType contains 'video/') and '${folderId}' in parents and trashed=false`,
+        fields: 'files(id,name,mimeType,thumbnailLink)',
+        pageSize: 100, orderBy: 'modifiedTime desc',
+      });
+      files = r.result.files || [];
+    } catch(e) { files = S.media.filter(f => f.parents?.includes(folderId)); }
+  }
+  grid.innerHTML = _pickerGrid(files, postId);
 }
 
 function attachImage(postId, fileId, thumbnailLink, name) {
@@ -1209,17 +1274,26 @@ function renderPend() {
           }
         </div>
         <div class="appr-content">
-          ${p.imageDescription ? `<div style="font-size:10px;color:var(--muted);margin-bottom:7px;">📷 ${p.imageDescription}</div>` : ''}
           <div class="appr-caption">${(p.caption||'').replace(/\n/g,'<br>')}</div>
           <div class="appr-tags">${p.hashtags||''}</div>
-          ${p.scheduleHint ? `<div class="appr-hint">⏰ Sugerido: ${p.scheduleHint}</div>` : ''}
-          <div class="appr-actions">
+          ${p.imageName
+            ? `<div style="font-size:10px;color:var(--green-300);margin-top:5px;">
+                 ✅ ${p.imageName}${p.imageSuggested?' <span style="opacity:.7">(sugerida)</span>':''}
+               </div>`
+            : ''}
+          ${p.imageDescription
+            ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${p.imageDescription.replace(/"/g,'&quot;')}">
+                 📷 ${p.imageDescription}
+               </div>`
+            : ''}
+          ${p.scheduleHint ? `<div class="appr-hint" style="margin-top:5px;">⏰ ${p.scheduleHint}</div>` : ''}
+          <div class="appr-actions" style="margin-top:10px;">
             <button class="btn btn-success btn-sm" onclick="approvePost('${p.id}')">✅ Aprobar</button>
-            <button class="btn btn-ghost btn-sm"   onclick="pickImageForPost('${p.id}')">🖼️ Imagen</button>
+            <button class="btn btn-ghost btn-sm"   onclick="pickImageForPost('${p.id}')">🖼️ ${p.imageName?'Cambiar':'+ Imagen'}</button>
             <button class="btn btn-ghost btn-sm"   onclick="schedulePost('${p.id}')">📅 Programar</button>
             <button class="btn btn-ghost btn-sm"   onclick="copyPost('${p.id}')">📋 Copiar</button>
             <button class="btn btn-warning btn-sm" onclick="requestChanges('${p.id}')">✏️ Cambios</button>
-            <button class="btn btn-danger btn-sm"  onclick="deletePost('${p.id}')">🗑️ Rechazar</button>
+            <button class="btn btn-danger btn-sm"  onclick="deletePost('${p.id}')">🗑️</button>
           </div>
         </div>
       </div>
@@ -1331,13 +1405,33 @@ function calDayClick(iso) {
    MEDIA LIBRARY
 ══════════════════════════════════════════════ */
 function renderLib() {
-  const grid = document.getElementById('libGrid');
   if (!S.media.length) {
-    grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🖼️</div><p>Conecta tu Google Drive para ver tus medios</p><button class="btn btn-primary" onclick="connectDrive()">Conectar Google Drive</button></div>`;
+    document.getElementById('libGrid').innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🖼️</div><p>Conecta tu Google Drive para ver tus medios</p><button class="btn btn-primary" onclick="connectDrive()">Conectar Google Drive</button></div>`;
     return;
   }
-  grid.innerHTML = S.media.map(f => `
-    <div class="media-card" onclick="toggleMedia(this,'${f.id}')">
+  renderFolderTabs();
+  renderLibWithFiles(S.media);
+}
+
+function filterLib(type, btn) {
+  S.libType = type;
+  document.querySelectorAll('.lib-type-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderLibWithFiles(S.media);
+}
+
+function toggleMedia(el) { el.classList.toggle('selected'); }
+
+function renderLibWithFiles(files) {
+  const grid = document.getElementById('libGrid');
+  if (!files || !files.length) {
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🖼️</div><p>No hay archivos en esta carpeta</p></div>`;
+    return;
+  }
+  const filtered = S.libType === 'all' ? files
+    : files.filter(f => f.mimeType?.startsWith(S.libType === 'image' ? 'image' : 'video'));
+  grid.innerHTML = filtered.map(f => `
+    <div class="media-card" onclick="toggleMedia(this)">
       <div class="media-thumb-box">
         ${f.thumbnailLink ? `<img src="${f.thumbnailLink}" alt="${f.name}" loading="lazy">` : ''}
         <span style="position:relative;z-index:1;">${f.mimeType?.startsWith('video') ? '🎬' : '🖼️'}</span>
@@ -1346,13 +1440,81 @@ function renderLib() {
     </div>`).join('');
 }
 
-function filterLib(type) {
-  const all = DB.get('driveFiles', []);
-  S.media = type === 'all' ? all : all.filter(f => f.mimeType?.startsWith(type));
-  renderLib();
+/* ── Carpetas de Drive ── */
+async function loadDriveFolders() {
+  if (!_gapiInited) return;
+  try {
+    const r = await gapi.client.drive.files.list({
+      q: "mimeType='application/vnd.google-apps.folder' and trashed=false",
+      fields: 'files(id,name)',
+      pageSize: 50,
+      orderBy: 'name',
+    });
+    S.folders = r.result.files || [];
+    renderFolderTabs();
+  } catch(e) { console.error('Folders error:', e); }
 }
 
-function toggleMedia(el) { el.classList.toggle('selected'); }
+function renderFolderTabs() {
+  const el = document.getElementById('folderTabs');
+  if (!el) return;
+  el.innerHTML = [
+    `<button class="btn btn-ghost btn-sm lib-folder-btn ${!S.activeFolder?'active':''}" onclick="setFolder(null,this)">📁 Todas</button>`,
+    ...S.folders.map(f =>
+      `<button class="btn btn-ghost btn-sm lib-folder-btn ${S.activeFolder===f.id?'active':''}"
+        onclick="setFolder('${f.id}',this)" title="${f.name}">
+        📁 ${f.name.length>18?f.name.slice(0,16)+'…':f.name}
+      </button>`
+    )
+  ].join('');
+}
+
+async function setFolder(folderId, btn) {
+  S.activeFolder = folderId;
+  document.querySelectorAll('.lib-folder-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const { driveFolder } = S.sett;
+  try {
+    let q = "(mimeType contains 'image/' or mimeType contains 'video/') and trashed=false";
+    if (folderId)   q += ` and '${folderId}' in parents`;
+    else if (driveFolder) q += ` and '${driveFolder}' in parents`;
+    const r = await gapi.client.drive.files.list({
+      q, fields:'files(id,name,mimeType,size,thumbnailLink)', pageSize:200, orderBy:'modifiedTime desc'
+    });
+    const files = r.result.files || [];
+    if (!folderId) { S.media = files; DB.set('driveFiles', files); }
+    renderLibWithFiles(files);
+  } catch(e) { toast('Error cargando carpeta: '+(e.result?.error?.message||e.message), 'error'); }
+}
+
+/* ── Auto-sugerir imagen desde Drive ── */
+function suggestImageForPost(post) {
+  if (!S.media.length || post.imageThumbnail) return; // ya tiene imagen
+  const desc = (post.imageDescription || post.caption || '').toLowerCase();
+  const words = desc.split(/[\s,.:;!?]+/).filter(w => w.length > 4);
+
+  let best = null, bestScore = -1;
+  for (const f of S.media) {
+    if (!f.thumbnailLink) continue;
+    const name = f.name.toLowerCase().replace(/[-_]/g,' ');
+    let score = words.reduce((s, w) => s + (name.includes(w) ? 2 : 0), 0);
+    // bonus por tipo de contenido
+    if (post.type === 'reel' && f.mimeType?.startsWith('video')) score += 3;
+    if (post.type !== 'reel' && f.mimeType?.startsWith('image')) score += 1;
+    if (score > bestScore) { bestScore = score; best = f; }
+  }
+  // Si no hubo match por keywords, toma una imagen aleatoria con thumbnail
+  if (!best) {
+    const withThumbs = S.media.filter(f => f.thumbnailLink);
+    if (withThumbs.length) best = withThumbs[Math.floor(Math.random() * withThumbs.length)];
+  }
+  if (best) {
+    post.imageId        = best.id;
+    post.imageThumbnail = best.thumbnailLink;
+    post.imageName      = best.name;
+    post.imageSuggested = true;
+  }
+}
 
 /* ── Google Drive (usa Google Identity Services — nuevo estándar 2024) ── */
 let _gapiInited = false;
@@ -1424,7 +1586,7 @@ async function loadDrive() {
   const { driveFolder } = S.sett;
   if (!_gapiInited) { await connectDrive(); return; }
   try {
-    let q = "(mimeType contains 'image/' or mimeType contains 'video/')";
+    let q = "(mimeType contains 'image/' or mimeType contains 'video/') and trashed=false";
     if (driveFolder) q += ` and '${driveFolder}' in parents`;
     const r = await gapi.client.drive.files.list({
       q,
@@ -1437,6 +1599,8 @@ async function loadDrive() {
     document.getElementById('s-imgs').textContent = S.media.length;
     renderLib();
     toast(`${S.media.length} archivos cargados desde Drive ✅`, 'success');
+    // Cargar carpetas también
+    await loadDriveFolders();
   } catch (e) {
     const msg = e.result?.error?.message || e.message || 'Error desconocido';
     toast('Error cargando Drive: ' + msg, 'error');
