@@ -522,6 +522,7 @@
     <div class="vhead">
       <h1>Pendientes de Aprobación</h1>
       <button class="btn btn-success btn-sm" onclick="approveAll()">✅ Aprobar Todo</button>
+      <button class="btn btn-danger btn-sm" id="btnDeleteAll" onclick="deleteAllPending()">🗑️ Eliminar Todo</button>
     </div>
     <div class="list-wrap" id="pendList"></div>
   </div>
@@ -979,6 +980,28 @@ function approveAll() {
   pend.forEach(p => { p.status = 'approved'; p.approvedAt = new Date().toISOString(); });
   persistPosts(); updateBadge(); renderPend(); renderDash();
   toast(`${pend.length} publicaciones aprobadas`, 'success');
+}
+
+function deleteAllPending() {
+  const pend = S.posts.filter(x => x.status === 'pending');
+  if (!pend.length) { toast('No hay pendientes', 'warning'); return; }
+  const btn = document.getElementById('btnDeleteAll');
+  if (btn.dataset.confirm !== '1') {
+    btn.textContent = `⚠️ Confirmar (${pend.length})`;
+    btn.dataset.confirm = '1';
+    setTimeout(() => {
+      if (btn.dataset.confirm === '1') {
+        btn.textContent = '🗑️ Eliminar Todo';
+        delete btn.dataset.confirm;
+      }
+    }, 4000);
+    return;
+  }
+  S.posts = S.posts.filter(x => x.status !== 'pending');
+  btn.textContent = '🗑️ Eliminar Todo';
+  delete btn.dataset.confirm;
+  persistPosts(); updateBadge(); renderPend(); renderDash();
+  toast(`${pend.length} publicaciones eliminadas`, 'success');
 }
 
 /* ══════════════════════════════════════════════
