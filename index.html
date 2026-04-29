@@ -646,6 +646,26 @@
         </div>
       </div>
 
+      <div class="settings-section">
+        <h2>🧠 Memoria de Marca</h2>
+        <div class="form-group">
+          <label class="fl">Publicaciones de referencia (pega aquí tus mejores posts de Instagram)</label>
+          <textarea class="fi" id="sRefPosts" rows="8" placeholder="Pega aquí publicaciones reales de Ruta Camp para que la IA aprenda tu estilo, tono y vocabulario.
+
+Ejemplo:
+---
+¿Qué hay mejor que despertar con vista al volcán? 🌋
+Ruta Camp Malalcahuello te espera este fin de semana.
+#RutaCamp #Malalcahuello
+
+---
+El sur de Chile tiene algo que no se puede describir con palabras...
+Solo se puede vivir. 🌿
+#RutaCamp #SurDeChile" oninput="saveSett()" style="resize:vertical;min-height:180px;font-size:12px;line-height:1.5;"></textarea>
+          <div class="fi-hint">Cuantos más ejemplos reales agregues, más fiel al estilo de Ruta Camp será el contenido generado. Las últimas 8 publicaciones aprobadas en el bot también se incluyen automáticamente.</div>
+        </div>
+      </div>
+
       <button class="btn btn-primary" onclick="saveSett();toast('Configuración guardada ✅','success')">Guardar Configuración</button>
     </div>
   </div>
@@ -701,7 +721,7 @@ function loadSett() {
     sClaudeKey: 'claudeKey', sClaudeModel: 'claudeModel',
     sBufferProfile: 'bufferProfile', sGithubToken: 'githubToken',
     sGoogleKey: 'googleKey', sGoogleClient: 'googleClient', sDriveFolder: 'driveFolder',
-    sBrandName: 'brandName', sBrandTone: 'brandTone', sBrandTags: 'brandTags', sLang: 'lang',
+    sBrandName: 'brandName', sBrandTone: 'brandTone', sBrandTags: 'brandTags', sLang: 'lang', sRefPosts: 'refPosts',
   };
   Object.entries(map).forEach(([elId, key]) => {
     const el = document.getElementById(elId);
@@ -722,6 +742,7 @@ function saveSett() {
     brandTone:     document.getElementById('sBrandTone').value,
     brandTags:     document.getElementById('sBrandTags').value,
     lang:          document.getElementById('sLang').value || 'es',
+    refPosts:      document.getElementById('sRefPosts').value,
   };
   S.sett = s;
   DB.set('sett', s);
@@ -750,13 +771,31 @@ function nav(v) {
    CLAUDE API
 ══════════════════════════════════════════════ */
 function buildSystemPrompt() {
-  const { brandName = 'Ruta Camp', brandTone = 'empresa de turismo outdoor, aventurero y apasionado', brandTags = '#rutacamp #outdoor', lang = 'es' } = S.sett;
+  const { brandName = 'Ruta Camp', brandTone = 'empresa de turismo outdoor, aventurero y apasionado', brandTags = '#rutacamp #outdoor', lang = 'es', refPosts = '' } = S.sett;
   const language = lang === 'en' ? 'English' : 'Español';
+
+  // Últimas publicaciones aprobadas/publicadas como ejemplos de estilo
+  const pastPosts = S.posts
+    .filter(p => p.status === 'approved' || p.status === 'published' || p.status === 'scheduled')
+    .slice(-8)
+    .map(p => `• [${p.type}] ${(p.caption||'').slice(0,200)}${p.hashtags ? '\n  Hashtags: '+p.hashtags.slice(0,120) : ''}`)
+    .join('\n');
+
+  const pastSection = pastPosts ? `
+PUBLICACIONES REALES ANTERIORES DE ${brandName} (aprende su tono, estilo y vocabulario):
+${pastPosts}
+` : '';
+
+  const refSection = refPosts.trim() ? `
+PUBLICACIONES DE REFERENCIA ADICIONALES (imita este estilo):
+${refPosts.trim()}
+` : '';
+
   return `Eres el asistente de redes sociales de ${brandName}.
 Descripción/Tono: ${brandTone}
 Idioma: ${language}
 Hashtags de la marca: ${brandTags}
-
+${pastSection}${refSection}
 IMPORTANTE: Cuando generes contenido para Instagram, SIEMPRE devuelve SOLO JSON válido con este formato exacto (sin texto adicional fuera del JSON):
 
 Para UN SOLO post/reel/historia/carrusel:
@@ -789,7 +828,7 @@ Para PLANIFICACIÓN (semana/mes/semestre), devuelve:
 }
 
 Incluye siempre los hashtags de la marca más hashtags relevantes al contenido.
-Mantén el tono de ${brandName} en todo el contenido.`;
+Aprende del tono, vocabulario y estilo de las publicaciones anteriores de ${brandName} para que el nuevo contenido sea coherente con la voz de la marca.`;
 }
 
 async function callClaude(messages) {
