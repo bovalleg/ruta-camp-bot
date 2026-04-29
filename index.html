@@ -228,31 +228,35 @@
     .list-wrap { flex: 1; overflow-y: auto; padding: 22px 26px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; align-content: start; align-items: start; }
     .appr-card {
       background: var(--bg-1); border: 1px solid var(--border); border-radius: 16px;
-      overflow: hidden; transition: border-color .15s, box-shadow .15s; display: flex; flex-direction: column;
+      overflow: hidden; transition: border-color .15s, box-shadow .15s;
     }
     .appr-card:hover { border-color: var(--green-700); box-shadow: 0 4px 20px rgba(0,0,0,.25); }
-    .appr-head {
-      padding: 10px 14px; border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; gap: 8px; background: var(--bg-2); flex-shrink: 0;
-    }
     .appr-thumb {
-      width: 100%; height: 220px; flex-shrink: 0;
+      width: 100%; height: 200px;
       background: linear-gradient(135deg, var(--green-900) 0%, #1a3a2a 100%);
-      display: flex; align-items: center; justify-content: center; font-size: 56px;
+      display: flex; align-items: center; justify-content: center; font-size: 48px;
       position: relative; overflow: hidden; cursor: pointer;
     }
-    .appr-thumb:hover::after {
-      content: '🖼️ Cambiar imagen';
-      position: absolute; inset: 0; background: rgba(0,0,0,.55);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 14px; color: #fff; font-family: inherit;
-    }
     .appr-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-    .appr-content { padding: 14px 16px; display: flex; flex-direction: column; flex: 1; }
-    .appr-caption { font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
-    .appr-tags    { font-size: 12px; color: #5BA3D9; margin-bottom: 8px; }
-    .appr-hint    { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
-    .appr-actions { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid var(--border); margin-top: auto; }
+    .appr-thumb-bar {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(transparent, rgba(0,0,0,.75));
+      padding: 24px 10px 8px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .appr-thumb-bar .appr-status { margin-left: auto; font-size: 10px; color: var(--orange); }
+    .appr-thumb-bar .appr-date   { font-size: 10px; color: rgba(255,255,255,.65); }
+    .appr-thumb:hover .appr-change-hint { display: flex; }
+    .appr-change-hint {
+      display: none; position: absolute; inset: 0;
+      background: rgba(0,0,0,.5); align-items: center; justify-content: center;
+      font-size: 13px; color: #fff;
+    }
+    .appr-content { padding: 12px 14px; }
+    .appr-caption { font-size: 13px; line-height: 1.6; margin-bottom: 8px; }
+    .appr-tags    { font-size: 11px; color: #5BA3D9; margin-bottom: 8px; }
+    .appr-hint    { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+    .appr-actions { display: flex; gap: 5px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--border); }
 
     /* ─── LIBRARY ─── */
     .lib-filter { padding: 14px 26px; border-bottom: 1px solid var(--border); display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
@@ -1303,17 +1307,18 @@ function renderPend() {
   }
   el.innerHTML = pend.map(p => `
     <div class="appr-card">
-      <div class="appr-head">
-        <span style="font-size:16px;">${typeEmoji(p.type)}</span>
-        <span class="type-badge">${p.type}</span>
-        <span style="font-size:11px;color:var(--muted);">${fmtDate(p.createdAt)}</span>
-        <span style="margin-left:auto;font-size:11px;color:var(--orange);">⏳ Pendiente</span>
-      </div>
       <div class="appr-thumb" onclick="pickImageForPost('${p.id}')" title="Clic para cambiar imagen">
         ${p.imageThumbnail
           ? `<img src="${p.imageThumbnail}" alt="">`
-          : `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;opacity:.7;">${typeEmoji(p.type)}<span style="font-size:11px;color:rgba(255,255,255,.6);">+ agregar imagen</span></div>`
+          : `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;opacity:.65;">${typeEmoji(p.type)}<span style="font-size:11px;color:rgba(255,255,255,.6);">+ agregar imagen</span></div>`
         }
+        <div class="appr-thumb-bar">
+          <span style="font-size:14px;">${typeEmoji(p.type)}</span>
+          <span class="type-badge">${p.type}</span>
+          <span class="appr-date">${fmtDate(p.createdAt)}</span>
+          <span class="appr-status">⏳ Pendiente</span>
+        </div>
+        <div class="appr-change-hint">🖼️ Cambiar imagen</div>
       </div>
       <div class="appr-content">
         <div class="appr-caption">${(p.caption||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</div>
