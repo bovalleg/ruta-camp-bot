@@ -345,13 +345,8 @@
       background: rgba(64,145,108,.2); border-color: var(--green-500); color: var(--green-300);
     }
 
-    /* ─── CARD CAPTION CLAMP ─── */
-    .appr-caption {
-      overflow: hidden;
-      display: -webkit-box;
-      -webkit-line-clamp: 4;
-      -webkit-box-orient: vertical;
-    }
+    /* ─── CARD CAPTION: sin límite de líneas ─── */
+    .appr-caption { overflow: visible; }
 
     /* ─── STATUS DOTS ─── */
     .sdot {
@@ -1111,9 +1106,13 @@ async function pickImageForPost(postId) {
     return;
   }
 
-  // Load folders on demand if not yet populated (e.g. after page reload)
+  // Load folders on demand if not yet populated
   if (!S.folders.length && _gapiInited) {
     await loadDriveFolders();
+  }
+  // Restore from cache if Drive not yet reconnected
+  if (!S.folders.length) {
+    S.folders = DB.get('driveFolders', []);
   }
 
   // Tabs de carpeta para el picker
@@ -1489,6 +1488,7 @@ async function loadDriveFolders() {
       orderBy: 'name',
     });
     S.folders = r.result.files || [];
+    DB.set('driveFolders', S.folders);
     renderFolderTabs();
   } catch(e) { console.error('Folders error:', e); }
 }
@@ -1683,8 +1683,9 @@ function closeModal(e) {
    INIT
 ══════════════════════════════════════════════ */
 function init() {
-  S.posts = DB.get('posts', []);
-  S.media = DB.get('driveFiles', []);
+  S.posts   = DB.get('posts', []);
+  S.media   = DB.get('driveFiles', []);
+  S.folders = DB.get('driveFolders', []);
   loadSett();
   renderDash();
   updateBadge();
