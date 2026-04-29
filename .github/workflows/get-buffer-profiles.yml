@@ -1,4 +1,4 @@
-name: 🔍 Ver Perfiles de Buffer
+name: 🔍 Ver Canales de Buffer
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ jobs:
   profiles:
     runs-on: ubuntu-latest
     steps:
-      - name: Obtener perfiles de Buffer
+      - name: Obtener canales de Buffer (GraphQL API)
         env:
           BUFFER_TOKEN: ${{ secrets.BUFFER_TOKEN }}
         run: |
@@ -20,69 +20,75 @@ jobs:
               print("❌ El secret BUFFER_TOKEN está vacío.")
               print("   Ve a: Settings → Secrets and variables → Actions → New repository secret")
               print("   Nombre: BUFFER_TOKEN")
-              print("   Valor: tu access token de Buffer")
+              print("   Valor: tu Personal Key de Buffer (publish.buffer.com → Settings → API → Personal Keys)")
               exit(1)
 
           print(f"Token: {token[:8]}...{token[-4:]} ({len(token)} caracteres)\n")
 
-          # Buffer API v1 - probamos 2 métodos de autenticación
-          tests = [
-              {
-                  "label": "Bearer header",
-                  "url": "https://api.bufferapp.com/1/profiles.json",
-                  "headers": {"Authorization": f"Bearer {token}"}
+          # Buffer nueva API GraphQL
+          query = """
+          {
+            channels {
+              id
+              name
+              service
+              serviceUsername
+            }
+          }
+          """
+
+          payload = json.dumps({"query": query}).encode()
+          req = urllib.request.Request(
+              "https://api.buffer.com/graphql",
+              data=payload,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/json",
               },
-              {
-                  "label": "access_token query param",
-                  "url": f"https://api.bufferapp.com/1/profiles.json?access_token={token}",
-                  "headers": {}
-              },
-          ]
+              method="POST"
+          )
 
-          for test in tests:
-              print(f"Probando: {test['label']}...")
-              try:
-                  req = urllib.request.Request(test["url"], headers=test["headers"])
-                  with urllib.request.urlopen(req, timeout=15) as resp:
-                      body = resp.read().decode()
-                      profiles = json.loads(body)
+          try:
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  body = resp.read().decode()
+                  result = json.loads(body)
 
-                      print(f"✅ ÉXITO con {test['label']}!\n")
-                      print("=" * 50)
-                      for p in profiles:
-                          print(f"  Red:     {p.get('service','?').upper()}")
-                          print(f"  Usuario: @{p.get('formatted_username','?')}")
-                          print(f"  ID:      {p.get('id','?')}  ← USA ESTE")
-                          print("-" * 50)
+                  if "errors" in result:
+                      print(f"❌ Error GraphQL: {result['errors']}")
+                      exit(1)
 
-                      summary = os.environ.get("GITHUB_STEP_SUMMARY","")
-                      if summary:
-                          with open(summary,"a") as f:
-                              f.write("## ✅ Perfiles de Buffer\n\n")
-                              f.write("| Red | Usuario | ID — pégalo en el bot |\n")
-                              f.write("|-----|---------|----------------------|\n")
-                              for p in profiles:
-                                  f.write(f"| {p.get('service','?')} | @{p.get('formatted_username','?')} | `{p.get('id','?')}` |\n")
-                              f.write("\n**Pasos:**\n")
-                              f.write("1. Copia el ID de Instagram\n")
-                              f.write("2. Agrégalo en Secrets: `BUFFER_PROFILE_ID`\n")
-                              f.write("3. Pégalo en ⚙️ Configuración del bot → 'ID de Perfil'\n")
+                  channels = result.get("data", {}).get("channels", [])
+                  if not channels:
+                      print("⚠ No se encontraron canales. Verifica que tu cuenta tenga canales conectados.")
                       exit(0)
 
-              except urllib.error.HTTPError as e:
-                  body = e.read().decode()
-                  print(f"  HTTP {e.code} {e.reason}")
-                  print(f"  Respuesta de Buffer: {body}\n")
-              except Exception as ex:
-                  print(f"  Error: {ex}\n")
+                  print("✅ Canales encontrados:\n")
+                  print("=" * 50)
+                  for c in channels:
+                      print(f"  Red:      {c.get('service','?').upper()}")
+                      print(f"  Usuario:  @{c.get('serviceUsername') or c.get('name','?')}")
+                      print(f"  ID:       {c.get('id','?')}  ← USA ESTE como BUFFER_PROFILE_ID")
+                      print("-" * 50)
 
-          print("\n❌ Ningún método funcionó.")
-          print("\n¿Qué hacer?")
-          print("  1. Verifica que el token sea el ACCESS TOKEN de Buffer")
-          print("     (no el Client ID ni el Client Secret)")
-          print("  2. Ve a: publish.buffer.com → tu foto → Settings → API")
-          print("     O: bufferapp.com/developers/apps → tu app → Access Token")
-          print("  3. Si tu plan no incluye API, considera usar el botón")
-          print("     'Copiar contenido' del bot para pegar manualmente en Buffer")
-          exit(1)
+                  summary = os.environ.get("GITHUB_STEP_SUMMARY","")
+                  if summary:
+                      with open(summary,"a") as f:
+                          f.write("## ✅ Canales de Buffer\n\n")
+                          f.write("| Red | Usuario | ID — pégalo en el bot |\n")
+                          f.write("|-----|---------|----------------------|\n")
+                          for c in channels:
+                              f.write(f"| {c.get('service','?')} | @{c.get('serviceUsername') or c.get('name','?')} | `{c.get('id','?')}` |\n")
+                          f.write("\n**Pasos:**\n")
+                          f.write("1. Copia el ID del canal de Instagram\n")
+                          f.write("2. Agrégalo en Secrets: `BUFFER_PROFILE_ID`\n")
+                          f.write("3. Pégalo en ⚙️ Configuración del bot → 'ID de Perfil'\n")
+
+          except urllib.error.HTTPError as e:
+              body = e.read().decode()
+              print(f"HTTP {e.code} {e.reason}")
+              print(f"Respuesta: {body}")
+              exit(1)
+          except Exception as ex:
+              print(f"Error: {ex}")
+              exit(1)
           PYEOF

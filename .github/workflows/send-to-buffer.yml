@@ -11,7 +11,7 @@ on:
         required: false
         default: ""
       scheduled_at:
-        description: "Timestamp Unix de publicación (vacío = próximo slot)"
+        description: "Timestamp Unix de publicación (vacío = idea/borrador)"
         required: false
         default: ""
       post_type:
@@ -23,7 +23,7 @@ jobs:
   send:
     runs-on: ubuntu-latest
     steps:
-      - name: Enviar a Buffer
+      - name: Enviar a Buffer (GraphQL API)
         env:
           BUFFER_TOKEN:   ${{ secrets.BUFFER_TOKEN }}
           BUFFER_PROFILE: ${{ secrets.BUFFER_PROFILE_ID }}
@@ -32,38 +32,64 @@ jobs:
           import os, urllib.request, urllib.parse, json
 
           token    = os.environ["BUFFER_TOKEN"]
-          profile  = os.environ["BUFFER_PROFILE"]
+          channel  = os.environ.get("BUFFER_PROFILE", "").strip()
           caption  = """${{ inputs.caption }}"""
           hashtags = """${{ inputs.hashtags }}"""
-          sched    = "${{ inputs.scheduled_at }}"
 
           text = caption.strip()
           if hashtags.strip():
               text += "\n\n" + hashtags.strip()
 
-          params = {
-              "text":            text,
-              "profile_ids[]":   profile,
+          # Buffer nueva API GraphQL - CreateIdea crea un post en Ideas/Queue
+          mutation = """
+          mutation CreateIdea($input: CreateIdeaInput!) {
+            createIdea(input: $input) {
+              id
+              content {
+                text
+              }
+            }
           }
-          if sched:
-              params["scheduled_at"] = sched
+          """
 
-          data = urllib.parse.urlencode(params).encode()
-          req  = urllib.request.Request(
-              "https://api.bufferapp.com/1/updates/create.json",
-              data=data,
+          variables = {
+              "input": {
+                  "content": {
+                      "text": text
+                  }
+              }
+          }
+
+          # Si hay channel ID, intentamos agregar al canal específico
+          if channel:
+              variables["input"]["channelId"] = channel
+
+          payload = json.dumps({
+              "query": mutation,
+              "variables": variables
+          }).encode()
+
+          req = urllib.request.Request(
+              "https://api.buffer.com/graphql",
+              data=payload,
               headers={
                   "Authorization": f"Bearer {token}",
-                  "Content-Type": "application/x-www-form-urlencoded",
+                  "Content-Type": "application/json",
               },
               method="POST"
           )
-          with urllib.request.urlopen(req) as resp:
+
+          with urllib.request.urlopen(req, timeout=30) as resp:
               result = json.loads(resp.read())
               print(json.dumps(result, indent=2, ensure_ascii=False))
-              updates = result.get("updates", [])
-              if updates:
-                  print(f"\n✅ Post enviado a Buffer. ID: {updates[0].get('id')}")
+
+              if "errors" in result:
+                  print(f"\n❌ Error: {result['errors']}")
+                  exit(1)
+
+              idea = result.get("data", {}).get("createIdea", {})
+              if idea:
+                  print(f"\n✅ Idea creada en Buffer. ID: {idea.get('id')}")
               else:
                   print("\n✅ Respuesta recibida de Buffer")
           PYEOF
