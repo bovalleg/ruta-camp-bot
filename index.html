@@ -1106,34 +1106,47 @@ async function pickImageForPost(postId) {
     return;
   }
 
-  // Load folders on demand if not yet populated
-  if (!S.folders.length && _gapiInited) {
-    await loadDriveFolders();
-  }
-  // Restore from cache if Drive not yet reconnected
-  if (!S.folders.length) {
-    S.folders = DB.get('driveFolders', []);
-  }
+  // 1. Try loading from cache first
+  if (!S.folders.length) S.folders = DB.get('driveFolders', []);
+  // 2. If Drive is connected and still empty, fetch from API
+  if (!S.folders.length && _gapiInited) await loadDriveFolders();
 
-  // Tabs de carpeta para el picker
+  _openPickerModal(postId);
+}
+
+function _openPickerModal(postId) {
   const folderTabs = [
     `<button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="refreshPickerGrid('${postId}',null,this)">📁 Todas</button>`,
     ...S.folders.map(f =>
       `<button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="refreshPickerGrid('${postId}','${f.id}',this)" title="${f.name}">
-        📁 ${f.name.length>14?f.name.slice(0,12)+'…':f.name}
+        📁 ${f.name.length>16?f.name.slice(0,14)+'…':f.name}
       </button>`
     )
   ].join('');
 
+  const noFolderNote = S.folders.length === 0
+    ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="reloadFoldersForPicker('${postId}')">🔄 Cargar carpetas</button>`
+    : '';
+
   openModal('🖼️ Seleccionar Imagen', `
     <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);">
-      ${folderTabs}
+      ${folderTabs}${noFolderNote}
     </div>
     <div id="pickerGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-height:360px;overflow-y:auto;padding-right:2px;">
       ${_pickerGrid(S.media, postId)}
     </div>
     <button class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="closeModal()">Cancelar</button>
   `);
+}
+
+async function reloadFoldersForPicker(postId) {
+  if (!_gapiInited) {
+    toast('Conecta Google Drive primero (Biblioteca → Conectar Drive)', 'warning');
+    return;
+  }
+  await loadDriveFolders();
+  closeModal();
+  _openPickerModal(postId);
 }
 
 async function refreshPickerGrid(postId, folderId, btn) {
