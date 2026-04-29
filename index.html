@@ -648,11 +648,24 @@
 
       <div class="settings-section">
         <h2>🧠 Memoria de Marca</h2>
-        <div class="form-group">
-          <label class="fl">Publicaciones de referencia (pega aquí tus mejores posts de Instagram)</label>
-          <textarea class="fi" id="sRefPosts" rows="8" placeholder="Pega aquí publicaciones reales de Ruta Camp para que la IA aprenda tu estilo, tono y vocabulario.
 
-Ejemplo:
+        <div style="background:rgba(116,198,157,.08);border:1px solid rgba(116,198,157,.2);border-radius:9px;padding:11px 14px;margin-bottom:16px;font-size:12px;line-height:1.6;color:var(--green-300);">
+          ℹ️ El bot aprende automáticamente de <strong>rutacamp.cl</strong> e <strong>Instagram @ruta.camp</strong> mediante un scraper semanal. Presiona el botón para actualizar ahora.
+        </div>
+
+        <div class="form-group">
+          <label class="fl">Conocimiento automático de marca</label>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm" onclick="triggerBrandScrape()">🔍 Actualizar conocimiento de marca</button>
+            <span id="brandKnowledgeStatus" style="font-size:12px;color:var(--muted);"></span>
+          </div>
+          <div class="fi-hint">Lanza el scraper en GitHub Actions. Tarda ~1 minuto. El bot usará el resultado en todos los prompts de IA automáticamente. Se actualiza solo cada lunes.</div>
+        </div>
+
+        <div class="form-group">
+          <label class="fl">Publicaciones de referencia adicionales (opcional)</label>
+          <textarea class="fi" id="sRefPosts" rows="6" placeholder="Opcional: pega aquí publicaciones reales de Ruta Camp para reforzar el estilo.
+
 ---
 ¿Qué hay mejor que despertar con vista al volcán? 🌋
 Ruta Camp Malalcahuello te espera este fin de semana.
@@ -661,8 +674,8 @@ Ruta Camp Malalcahuello te espera este fin de semana.
 ---
 El sur de Chile tiene algo que no se puede describir con palabras...
 Solo se puede vivir. 🌿
-#RutaCamp #SurDeChile" oninput="saveSett()" style="resize:vertical;min-height:180px;font-size:12px;line-height:1.5;"></textarea>
-          <div class="fi-hint">Cuantos más ejemplos reales agregues, más fiel al estilo de Ruta Camp será el contenido generado. Las últimas 8 publicaciones aprobadas en el bot también se incluyen automáticamente.</div>
+#RutaCamp #SurDeChile" oninput="saveSett()" style="resize:vertical;min-height:140px;font-size:12px;line-height:1.5;"></textarea>
+          <div class="fi-hint">Complementa el aprendizaje automático. Las últimas 8 publicaciones aprobadas en el bot también se incluyen siempre.</div>
         </div>
       </div>
 
@@ -701,6 +714,7 @@ const S = {
   calDate:      new Date(),
   busy:         false,
   sett:         {},
+  brandKnowledge: null,
 };
 
 /* ══════════════════════════════════════════════
@@ -727,6 +741,20 @@ function loadSett() {
     const el = document.getElementById(elId);
     if (el && s[key]) el.value = s[key];
   });
+  // Show brand knowledge status
+  const statusEl = document.getElementById('brandKnowledgeStatus');
+  if (statusEl) {
+    if (S.brandKnowledge?.updatedAt) {
+      const d = new Date(S.brandKnowledge.updatedAt);
+      const hasData = S.brandKnowledge.brandSummary && !S.brandKnowledge.brandSummary.startsWith('(');
+      statusEl.textContent = hasData
+        ? `✅ Actualizado ${d.toLocaleDateString('es-CL')} — marca aprendida`
+        : `⚠️ Sin síntesis (${d.toLocaleDateString('es-CL')}) — agrega ANTHROPIC_API_KEY en GitHub Secrets`;
+      statusEl.style.color = hasData ? 'var(--green-400)' : 'var(--warning)';
+    } else {
+      statusEl.textContent = '⚪ Sin datos — presiona el botón para iniciar';
+    }
+  }
 }
 
 function saveSett() {
@@ -774,6 +802,23 @@ function buildSystemPrompt() {
   const { brandName = 'Ruta Camp', brandTone = 'empresa de turismo outdoor, aventurero y apasionado', brandTags = '#rutacamp #outdoor', lang = 'es', refPosts = '' } = S.sett;
   const language = lang === 'en' ? 'English' : 'Español';
 
+  // Brand knowledge from rutacamp.cl scrape
+  let brandKnowledgeSection = '';
+  if (S.brandKnowledge && S.brandKnowledge.brandSummary && !S.brandKnowledge.brandSummary.startsWith('(')) {
+    brandKnowledgeSection = `
+CONOCIMIENTO PROFUNDO DE LA MARCA (extraído de rutacamp.cl e Instagram):
+${S.brandKnowledge.brandSummary}
+`;
+    if (S.brandKnowledge.instagramInsights?.commonHashtags?.length) {
+      brandKnowledgeSection += `\nHashtags más usados por la marca: ${S.brandKnowledge.instagramInsights.commonHashtags.slice(0,20).join(' ')}\n`;
+    }
+    if (S.brandKnowledge.instagramInsights?.recentCaptions?.length) {
+      const captions = S.brandKnowledge.instagramInsights.recentCaptions.slice(0,5)
+        .map(c => `• ${c.slice(0,200)}`).join('\n');
+      brandKnowledgeSection += `\nPublicaciones recientes de Instagram (@ruta.camp):\n${captions}\n`;
+    }
+  }
+
   // Últimas publicaciones aprobadas/publicadas como ejemplos de estilo
   const pastPosts = S.posts
     .filter(p => p.status === 'approved' || p.status === 'published' || p.status === 'scheduled')
@@ -795,7 +840,7 @@ ${refPosts.trim()}
 Descripción/Tono: ${brandTone}
 Idioma: ${language}
 Hashtags de la marca: ${brandTags}
-${pastSection}${refSection}
+${brandKnowledgeSection}${pastSection}${refSection}
 IMPORTANTE: Cuando generes contenido para Instagram, SIEMPRE devuelve SOLO JSON válido con este formato exacto (sin texto adicional fuera del JSON):
 
 Para UN SOLO post/reel/historia/carrusel:
@@ -1080,6 +1125,26 @@ async function sendToBuffer(post) {
     post_type:    post.type      || 'post',
   });
   return r;
+}
+
+async function triggerBrandScrape() {
+  const { githubToken } = S.sett;
+  if (!githubToken) { toast('Configura tu GitHub Token primero', 'error'); nav('settings'); return; }
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = '⏳ Lanzando...';
+  toast('Lanzando scraper de marca en GitHub Actions…', 'warning');
+  const r = await dispatchWorkflow('scrape-brand.yml');
+  if (r.ok) {
+    toast('✅ Scraper lanzado — tarda ~1 min. El bot aprenderá automáticamente.', 'success');
+    const el = document.getElementById('brandKnowledgeStatus');
+    if (el) el.textContent = '⏳ Actualizando... (recarga en ~2 min)';
+    setTimeout(() => window.open(`https://github.com/${GH_REPO}/actions`, '_blank'), 800);
+  } else {
+    toast('Error al lanzar el scraper. Verifica tu GitHub Token', 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = '🔍 Actualizar conocimiento de marca';
 }
 
 async function detectBufferProfiles() {
@@ -1734,6 +1799,20 @@ function closeModal(e) {
 /* ══════════════════════════════════════════════
    INIT
 ══════════════════════════════════════════════ */
+async function loadBrandKnowledge() {
+  try {
+    const r = await fetch('data/brand-knowledge.json?_=' + Date.now());
+    if (!r.ok) return;
+    const data = await r.json();
+    if (data && data.updatedAt) {
+      S.brandKnowledge = data;
+      console.log('[Ruta Camp] Conocimiento de marca cargado:', data.updatedAt);
+    }
+  } catch (e) {
+    // Silently fail — brand knowledge is optional
+  }
+}
+
 function init() {
   S.posts   = DB.get('posts', []);
   S.media   = DB.get('driveFiles', []);
@@ -1741,6 +1820,7 @@ function init() {
   loadSett();
   renderDash();
   updateBadge();
+  loadBrandKnowledge();
   if (!S.sett.claudeKey) setTimeout(() => toast('⚙️ Configura tus API keys para comenzar', 'warning'), 800);
 }
 

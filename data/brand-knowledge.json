@@ -1,0 +1,24 @@
+{
+  "updatedAt": null,
+  "brand": {
+    "name": "Ruta Camp",
+    "tagline": "",
+    "description": "",
+    "values": [],
+    "offerings": [],
+    "locations": [],
+    "audience": "",
+    "tone": ""
+  },
+  "websiteContent": {
+    "main": "",
+    "about": "",
+    "services": "",
+    "destinations": ""
+  },
+  "instagramInsights": {
+    "recentCaptions": [],
+    "commonHashtags": [],
+    "contentThemes": []
+  }
+}
