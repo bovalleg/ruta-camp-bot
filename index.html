@@ -1482,7 +1482,11 @@ function renderPub() {
           ${p.scheduledAt ? `<div class="appr-hint">📅 Programado: ${fmtDate(p.scheduledAt)}</div>` : ''}
           ${p.bufferId ? `<div class="appr-hint">Buffer ID: ${p.bufferId}</div>` : ''}
           <div class="appr-actions">
-            ${p.status === 'approved' ? `<button class="btn btn-ghost btn-sm" onclick="markPublished('${p.id}')">✅ Marcar Publicado</button>` : ''}
+            ${p.status === 'approved' ? `
+              <button class="btn btn-primary btn-sm" onclick="schedulePost('${p.id}')">📤 Enviar a Buffer</button>
+              <button class="btn btn-ghost btn-sm" onclick="markPublished('${p.id}')">✅ Marcar Publicado</button>
+            ` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="copyPost('${p.id}')">📋 Copiar</button>
             <button class="btn btn-danger btn-sm" onclick="deletePost('${p.id}')">🗑️</button>
           </div>
         </div>
