@@ -7,7 +7,7 @@ jobs:
   profiles:
     runs-on: ubuntu-latest
     steps:
-      - name: Obtener canales de Buffer (GraphQL API)
+      - name: Obtener canales via Buffer MCP
         env:
           BUFFER_TOKEN: ${{ secrets.BUFFER_TOKEN }}
         run: |
@@ -15,80 +15,91 @@ jobs:
           import os, urllib.request, urllib.error, json
 
           token = os.environ.get("BUFFER_TOKEN", "").strip()
+          MCP_URL = "https://mcp.buffer.com/mcp"
 
           if not token:
-              print("❌ El secret BUFFER_TOKEN está vacío.")
-              print("   Ve a: Settings → Secrets and variables → Actions → New repository secret")
-              print("   Nombre: BUFFER_TOKEN")
-              print("   Valor: tu Personal Key de Buffer (publish.buffer.com → Settings → API → Personal Keys)")
+              print("❌ BUFFER_TOKEN vacío")
               exit(1)
 
-          print(f"Token: {token[:8]}...{token[-4:]} ({len(token)} caracteres)\n")
+          print(f"Token: {token[:8]}...{token[-4:]}\n")
 
-          # Buffer nueva API GraphQL
-          query = """
-          {
-            channels {
-              id
-              name
-              service
-              serviceUsername
-            }
-          }
-          """
-
-          payload = json.dumps({"query": query}).encode()
-          req = urllib.request.Request(
-              "https://api.buffer.com/graphql",
-              data=payload,
-              headers={
+          def mcp_init():
+              payload = json.dumps({
+                  "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                  "params": {
+                      "protocolVersion": "2024-11-05",
+                      "capabilities": {},
+                      "clientInfo": {"name": "ruta-camp-bot", "version": "1.0"}
+                  }
+              }).encode()
+              req = urllib.request.Request(MCP_URL, data=payload, headers={
                   "Authorization": f"Bearer {token}",
                   "Content-Type": "application/json",
-              },
-              method="POST"
-          )
+                  "Accept": "application/json, text/event-stream",
+              }, method="POST")
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  return resp.headers.get("Mcp-Session-Id", "")
 
-          try:
+          def mcp_call(session_id, tool, arguments={}):
+              payload = json.dumps({
+                  "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                  "params": {"name": tool, "arguments": arguments}
+              }).encode()
+              req = urllib.request.Request(MCP_URL, data=payload, headers={
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/json",
+                  "Accept": "application/json, text/event-stream",
+                  "Mcp-Session-Id": session_id,
+              }, method="POST")
               with urllib.request.urlopen(req, timeout=15) as resp:
                   body = resp.read().decode()
-                  result = json.loads(body)
+              # Parse SSE or JSON
+              for line in body.splitlines():
+                  if line.startswith("data:"):
+                      try: return json.loads(line[5:].strip())
+                      except: pass
+              return json.loads(body)
 
-                  if "errors" in result:
-                      print(f"❌ Error GraphQL: {result['errors']}")
-                      exit(1)
+          print("Conectando al MCP de Buffer...")
+          session_id = mcp_init()
+          print(f"Session: {session_id[:16]}...\n")
 
-                  channels = result.get("data", {}).get("channels", [])
-                  if not channels:
-                      print("⚠ No se encontraron canales. Verifica que tu cuenta tenga canales conectados.")
-                      exit(0)
+          # Get account first (required by MCP)
+          print("Obteniendo cuenta...")
+          acc = mcp_call(session_id, "get_account")
+          acc_content = acc.get("result", {}).get("content", [{}])[0].get("text", "{}")
+          acc_data = json.loads(acc_content) if isinstance(acc_content, str) else acc_content
+          org_id = (acc_data.get("organization") or acc_data.get("account") or {}).get("id", "")
+          print(f"Org ID: {org_id}\n")
 
-                  print("✅ Canales encontrados:\n")
-                  print("=" * 50)
+          # List channels
+          print("Listando canales...")
+          args = {"organizationId": org_id} if org_id else {}
+          result = mcp_call(session_id, "list_channels", args)
+          content = result.get("result", {}).get("content", [{}])[0].get("text", "[]")
+          channels = json.loads(content) if isinstance(content, str) else content
+          if isinstance(channels, dict):
+              channels = channels.get("channels", channels.get("data", []))
+
+          print(f"\n{'='*50}")
+          print(f"✅ {len(channels)} canal(es) encontrado(s):\n")
+          for c in channels:
+              print(f"  Red:     {c.get('service','?').upper()}")
+              print(f"  Nombre:  {c.get('name') or c.get('displayName','?')}")
+              print(f"  Usuario: @{c.get('serviceUsername') or c.get('handle','?')}")
+              print(f"  ID:      {c.get('id','?')}  ← USA ESTE como BUFFER_PROFILE_ID")
+              print(f"{'-'*50}")
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY","")
+          if summary and channels:
+              with open(summary,"a") as f:
+                  f.write("## ✅ Canales de Buffer\n\n")
+                  f.write("| Red | Usuario | ID — pégalo en el bot |\n")
+                  f.write("|-----|---------|----------------------|\n")
                   for c in channels:
-                      print(f"  Red:      {c.get('service','?').upper()}")
-                      print(f"  Usuario:  @{c.get('serviceUsername') or c.get('name','?')}")
-                      print(f"  ID:       {c.get('id','?')}  ← USA ESTE como BUFFER_PROFILE_ID")
-                      print("-" * 50)
-
-                  summary = os.environ.get("GITHUB_STEP_SUMMARY","")
-                  if summary:
-                      with open(summary,"a") as f:
-                          f.write("## ✅ Canales de Buffer\n\n")
-                          f.write("| Red | Usuario | ID — pégalo en el bot |\n")
-                          f.write("|-----|---------|----------------------|\n")
-                          for c in channels:
-                              f.write(f"| {c.get('service','?')} | @{c.get('serviceUsername') or c.get('name','?')} | `{c.get('id','?')}` |\n")
-                          f.write("\n**Pasos:**\n")
-                          f.write("1. Copia el ID del canal de Instagram\n")
-                          f.write("2. Agrégalo en Secrets: `BUFFER_PROFILE_ID`\n")
-                          f.write("3. Pégalo en ⚙️ Configuración del bot → 'ID de Perfil'\n")
-
-          except urllib.error.HTTPError as e:
-              body = e.read().decode()
-              print(f"HTTP {e.code} {e.reason}")
-              print(f"Respuesta: {body}")
-              exit(1)
-          except Exception as ex:
-              print(f"Error: {ex}")
-              exit(1)
+                      f.write(f"| {c.get('service','?')} | @{c.get('serviceUsername') or c.get('handle','?')} | `{c.get('id','?')}` |\n")
+                  f.write("\n**Próximo paso:**\n")
+                  f.write("1. Copia el ID del canal de Instagram\n")
+                  f.write("2. Agrégalo en Secrets: `BUFFER_PROFILE_ID`\n")
+                  f.write("3. Pégalo en ⚙️ Configuración del bot → 'ID de Perfil'\n")
           PYEOF
