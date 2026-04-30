@@ -1,4 +1,4 @@
-name: 📤 Enviar Post a Buffer
+name: "\U0001F4E4 Enviar Post a Buffer"
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ on:
         required: false
         default: ""
       scheduled_at:
-        description: "Fecha/hora ISO 8601 (ej: 2026-05-01T09:00:00Z). Vacío = publicar ahora."
+        description: "Fecha ISO 8601 (ej: 2026-05-01T12:00:00Z). Vacio = agregar a queue."
         required: false
         default: ""
       post_type:
@@ -31,8 +31,8 @@ jobs:
           python3 - <<'PYEOF'
           import os, urllib.request, urllib.error, json
 
-          token    = os.environ.get("BUFFER_TOKEN","").strip()
-          channel  = os.environ.get("BUFFER_PROFILE","").strip()
+          token    = os.environ.get("BUFFER_TOKEN", "").strip()
+          channel  = os.environ.get("BUFFER_PROFILE", "").strip()
           caption  = """${{ inputs.caption }}"""
           hashtags = """${{ inputs.hashtags }}"""
           sched    = "${{ inputs.scheduled_at }}".strip()
@@ -42,101 +42,140 @@ jobs:
           if hashtags.strip():
               text += "\n\n" + hashtags.strip()
 
-          print(f"Canal: {channel or '(sin ID — se usará el primero disponible)'}")
-          print(f"Texto: {text[:80]}...")
+          print("Canal configurado: " + (channel or "(sin ID — se buscara automaticamente)"))
+          print("Texto: " + text[:100])
           if sched:
-              print(f"Programado: {sched}")
+              print("Programado: " + sched)
 
-          def mcp_init():
-              payload = json.dumps({
-                  "jsonrpc": "2.0", "id": 1, "method": "initialize",
-                  "params": {
-                      "protocolVersion": "2024-11-05",
-                      "capabilities": {},
-                      "clientInfo": {"name": "ruta-camp-bot", "version": "1.0"}
-                  }
-              }).encode()
-              req = urllib.request.Request(MCP_URL, data=payload, headers={
-                  "Authorization": f"Bearer {token}",
+          def post_mcp(payload_dict, session_id=None):
+              data = json.dumps(payload_dict).encode()
+              headers = {
+                  "Authorization": "Bearer " + token,
                   "Content-Type": "application/json",
                   "Accept": "application/json, text/event-stream",
-              }, method="POST")
-              with urllib.request.urlopen(req, timeout=15) as resp:
-                  return resp.headers.get("Mcp-Session-Id", "")
+              }
+              if session_id:
+                  headers["Mcp-Session-Id"] = session_id
+              req = urllib.request.Request(MCP_URL, data=data, headers=headers, method="POST")
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as resp:
+                      body = resp.read().decode()
+                      sid = resp.headers.get("Mcp-Session-Id", "")
+                      return body, sid, resp.status
+              except urllib.error.HTTPError as e:
+                  body = e.read().decode()
+                  print("HTTP ERROR " + str(e.code) + ": " + body[:300])
+                  return "", "", e.code
 
-          def mcp_call(session_id, tool, arguments={}):
-              payload = json.dumps({
-                  "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                  "params": {"name": tool, "arguments": arguments}
-              }).encode()
-              req = urllib.request.Request(MCP_URL, data=payload, headers={
-                  "Authorization": f"Bearer {token}",
-                  "Content-Type": "application/json",
-                  "Accept": "application/json, text/event-stream",
-                  "Mcp-Session-Id": session_id,
-              }, method="POST")
-              with urllib.request.urlopen(req, timeout=30) as resp:
-                  body = resp.read().decode()
-              for line in body.splitlines():
+          def safe_json(text):
+              if not text or not text.strip():
+                  return {}
+              text = text.strip()
+              for line in text.splitlines():
+                  line = line.strip()
                   if line.startswith("data:"):
-                      try: return json.loads(line[5:].strip())
-                      except: pass
-              return json.loads(body)
+                      chunk = line[5:].strip()
+                      if chunk and chunk != "[DONE]":
+                          try:
+                              return json.loads(chunk)
+                          except:
+                              pass
+              try:
+                  return json.loads(text)
+              except:
+                  pass
+              return {}
 
-          session_id = mcp_init()
-          print(f"Session MCP: {session_id[:16]}...\n")
+          def extract_text(parsed):
+              try:
+                  return parsed["result"]["content"][0]["text"]
+              except (KeyError, IndexError, TypeError):
+                  return ""
 
-          # Si no hay channel ID, obtenerlo automáticamente
+          # Init
+          body, session_id, status = post_mcp({
+              "jsonrpc": "2.0", "id": 1, "method": "initialize",
+              "params": {
+                  "protocolVersion": "2024-11-05",
+                  "capabilities": {},
+                  "clientInfo": {"name": "ruta-camp-bot", "version": "1.0"}
+              }
+          })
+          if status not in (200, 201, 202):
+              print("ERROR init MCP: " + str(status))
+              exit(1)
+          print("MCP conectado.")
+
+          # Si no hay channel, obtenerlo via get_account + list_channels
           if not channel:
-              print("Sin BUFFER_PROFILE_ID — obteniendo canal automáticamente...")
-              acc = mcp_call(session_id, "get_account")
-              acc_text = acc.get("result",{}).get("content",[{}])[0].get("text","{}")
-              acc_data = json.loads(acc_text) if isinstance(acc_text, str) else acc_text
-              org_id = (acc_data.get("organization") or acc_data.get("account") or {}).get("id","")
+              print("Buscando canal automaticamente...")
+              body_acc, _, _ = post_mcp({
+                  "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                  "params": {"name": "get_account", "arguments": {}}
+              }, session_id=session_id)
+              acc_text = extract_text(safe_json(body_acc))
+              org_id = ""
+              try:
+                  acc_data = json.loads(acc_text) if acc_text else {}
+                  orgs = acc_data.get("organizations", [])
+                  if orgs:
+                      org_id = orgs[0].get("id", "")
+              except:
+                  pass
 
-              ch_result = mcp_call(session_id, "list_channels", {"organizationId": org_id} if org_id else {})
-              ch_text = ch_result.get("result",{}).get("content",[{}])[0].get("text","[]")
-              channels = json.loads(ch_text) if isinstance(ch_text, str) else ch_text
-              if isinstance(channels, dict):
-                  channels = channels.get("channels", channels.get("data", []))
-              if channels:
-                  channel = channels[0].get("id","")
-                  print(f"  Usando canal: {channels[0].get('name','?')} ({channel})")
+              if org_id:
+                  body_ch, _, _ = post_mcp({
+                      "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                      "params": {"name": "list_channels", "arguments": {"organizationId": org_id}}
+                  }, session_id=session_id)
+                  ch_text = extract_text(safe_json(body_ch))
+                  try:
+                      channels = json.loads(ch_text) if ch_text else []
+                      if channels:
+                          channel = channels[0].get("id", "")
+                          print("Canal encontrado: " + channels[0].get("name","?") + " (" + channel + ")")
+                  except:
+                      pass
 
           if not channel:
-              print("❌ No se encontró canal de Buffer. Configura BUFFER_PROFILE_ID en Secrets.")
+              print("ERROR: no se encontro canal de Buffer. Configura BUFFER_PROFILE_ID en Secrets.")
               exit(1)
 
-          # Crear el post
-          print(f"\nCreando post en Buffer (canal: {channel})...")
-          args = {
-              "channelId": channel,
-              "text": text,
-          }
+          # Crear post
+          print("\nCreando post en Buffer...")
+          args = {"channelId": channel, "text": text}
           if sched:
               args["scheduledAt"] = sched
 
-          result = mcp_call(session_id, "create_post", args)
-          content = result.get("result",{}).get("content",[{}])[0].get("text","{}")
-          post_data = json.loads(content) if isinstance(content, str) else content
+          body_post, _, status_post = post_mcp({
+              "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+              "params": {"name": "create_post", "arguments": args}
+          }, session_id=session_id)
+          print("Status: " + str(status_post))
+          print("Body: " + body_post[:600])
 
-          print(f"\nRespuesta: {json.dumps(post_data, indent=2, ensure_ascii=False)[:500]}")
+          post_text = extract_text(safe_json(body_post))
+          print("Respuesta: " + post_text[:400])
 
-          post_id = (post_data.get("post") or post_data.get("createPost") or post_data or {}).get("id","?")
-          print(f"\n✅ Post enviado a Buffer! ID: {post_id}")
+          try:
+              post_data = json.loads(post_text) if post_text else {}
+              post_id = post_data.get("id") or post_data.get("post", {}).get("id", "?")
+          except:
+              post_id = "?"
 
-          summary = os.environ.get("GITHUB_STEP_SUMMARY","")
-          if summary:
-              with open(summary,"a") as f:
-                  f.write("## 📤 Post enviado a Buffer\n\n")
-                  f.write(f"- **Canal ID:** `{channel}`\n")
-                  f.write(f"- **Post ID:** `{post_id}`\n")
-                  f.write(f"- **Programado:** {sched or 'inmediato'}\n\n")
-                  f.write(f"**Texto:**\n\n{text[:400]}\n")
+          print("\n✅ Post enviado a Buffer! ID: " + str(post_id))
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          if summary_path:
+              with open(summary_path, "a") as f:
+                  f.write("## Post enviado a Buffer\n\n")
+                  f.write("- **Canal:** `" + channel + "`\n")
+                  f.write("- **Programado:** " + (sched or "queue automatico") + "\n\n")
+                  f.write("**Texto:**\n\n" + text[:400] + "\n")
           PYEOF
 
-      - name: Resumen
+      - name: Error summary
         if: failure()
         run: |
-          echo "## ❌ Error al enviar a Buffer" >> $GITHUB_STEP_SUMMARY
-          echo "Revisa los logs del paso anterior para ver el error." >> $GITHUB_STEP_SUMMARY
+          echo "## Error al enviar a Buffer" >> $GITHUB_STEP_SUMMARY
+          echo "Revisa los logs del paso anterior." >> $GITHUB_STEP_SUMMARY
