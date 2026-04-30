@@ -101,18 +101,10 @@ jobs:
           org_id = ""
           try:
               acc_data = json.loads(acc_text) if acc_text else {}
-              for path in [["organization","id"], ["account","organization","id"], ["id"]]:
-                  d = acc_data
-                  ok = True
-                  for k in path:
-                      if isinstance(d, dict) and k in d:
-                          d = d[k]
-                      else:
-                          ok = False
-                          break
-                  if ok and d and isinstance(d, str):
-                      org_id = d
-                      break
+              # organizations[0].id es el org ID (distinto al user id)
+              orgs = acc_data.get("organizations", [])
+              if orgs:
+                  org_id = orgs[0].get("id", "")
           except Exception as ex:
               print("Error parseando account: " + str(ex))
 
