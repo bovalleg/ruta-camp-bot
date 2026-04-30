@@ -1121,7 +1121,7 @@ async function sendToBuffer(post) {
   const r = await dispatchWorkflow('send-to-buffer.yml', {
     caption:      post.caption   || '',
     hashtags:     post.hashtags  || '',
-    scheduled_at: post.scheduledAt ? String(Math.floor(new Date(post.scheduledAt).getTime()/1000)) : '',
+    scheduled_at: post.scheduledAt ? new Date(post.scheduledAt).toISOString() : '',
     post_type:    post.type      || 'post',
   });
   return r;
