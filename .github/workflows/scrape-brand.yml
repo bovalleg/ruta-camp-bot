@@ -1,9 +1,8 @@
-name: 🧠 Actualizar Conocimiento de Marca
+name: "\U0001F9E0 Actualizar Conocimiento de Marca"
 
 on:
   workflow_dispatch:
   schedule:
-    # Todos los lunes a las 6am UTC
     - cron: '0 6 * * 1'
 
 jobs:
@@ -16,165 +15,68 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Instalar dependencias
-        run: pip install requests beautifulsoup4
-
-      - name: Scrape rutacamp.cl e Instagram
+      - name: Scrape rutacamp.cl y generar resumen de marca
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          pip install requests beautifulsoup4 -q
           python3 - <<'PYEOF'
           import os, json, re, time, urllib.request, urllib.error
           from datetime import datetime, timezone
-
-          try:
-              from bs4 import BeautifulSoup
-              import requests
-          except ImportError:
-              import subprocess
-              subprocess.run(["pip", "install", "requests", "beautifulsoup4", "-q"])
-              from bs4 import BeautifulSoup
-              import requests
+          from bs4 import BeautifulSoup
+          import requests
 
           ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-          HEADERS = {
-              "User-Agent": "Mozilla/5.0 (compatible; RutaCampBot/1.0; brand-learning)"
-          }
+          HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; RutaCampBot/1.0)"}
 
           def fetch_text(url):
               try:
                   r = requests.get(url, headers=HEADERS, timeout=15)
                   r.raise_for_status()
                   soup = BeautifulSoup(r.text, "html.parser")
-                  # Remove scripts, styles, nav, footer noise
-                  for tag in soup(["script","style","nav","footer","header","noscript","svg","meta","link"]):
+                  for tag in soup(["script","style","nav","footer","header","noscript","svg"]):
                       tag.decompose()
-                  text = soup.get_text(separator="\n", strip=True)
-                  # Collapse blank lines
-                  lines = [l.strip() for l in text.splitlines() if l.strip()]
-                  return "\n".join(lines)[:6000]
+                  lines = [l.strip() for l in soup.get_text(separator="\n", strip=True).splitlines() if l.strip()]
+                  return "\n".join(lines)[:5000]
               except Exception as e:
-                  print(f"  ⚠ No se pudo obtener {url}: {e}")
+                  print("  No se pudo obtener " + url + ": " + str(e))
                   return ""
 
-          print("🌐 Scrapeando rutacamp.cl...")
+          print("Scrapeando rutacamp.cl...")
           pages = {
               "main":         "https://www.rutacamp.cl",
               "about":        "https://www.rutacamp.cl/nosotros",
               "services":     "https://www.rutacamp.cl/servicios",
               "destinations": "https://www.rutacamp.cl/destinos",
               "blog":         "https://www.rutacamp.cl/blog",
-              "contact":      "https://www.rutacamp.cl/contacto",
           }
 
           website_content = {}
           all_web_text = ""
           for key, url in pages.items():
-              print(f"  Fetching {url}...")
+              print("  Fetching " + url)
               text = fetch_text(url)
               website_content[key] = text[:2000]
-              all_web_text += f"\n\n=== {key.upper()} ({url}) ===\n{text}"
+              all_web_text += "\n\n=== " + key.upper() + " ===\n" + text
               time.sleep(1)
-
-          # Try Instagram public page scraping
-          print("\n📸 Intentando obtener datos públicos de Instagram @ruta.camp...")
-          instagram_captions = []
-          instagram_hashtags = []
-
-          try:
-              ig_url = "https://www.instagram.com/ruta.camp/"
-              r = requests.get(ig_url, headers={
-                  **HEADERS,
-                  "Accept-Language": "es-ES,es;q=0.9",
-              }, timeout=15)
-              # Extract shared_data JSON embedded in page
-              match = re.search(r'window\._sharedData\s*=\s*(\{.*?\});</script>', r.text, re.DOTALL)
-              if match:
-                  data = json.loads(match.group(1))
-                  edges = (data.get("entry_data",{})
-                               .get("ProfilePage",[{}])[0]
-                               .get("graphql",{})
-                               .get("user",{})
-                               .get("edge_owner_to_timeline_media",{})
-                               .get("edges",[]))
-                  for e in edges[:20]:
-                      node = e.get("node", {})
-                      cap_edges = node.get("edge_media_to_caption",{}).get("edges",[])
-                      if cap_edges:
-                          text = cap_edges[0].get("node",{}).get("text","")
-                          if text:
-                              instagram_captions.append(text[:400])
-                              # Extract hashtags
-                              tags = re.findall(r'#\w+', text)
-                              instagram_hashtags.extend(tags)
-                  print(f"  ✅ {len(instagram_captions)} posts de Instagram obtenidos")
-              else:
-                  print("  ℹ sharedData no encontrado (Instagram puede requerir login)")
-          except Exception as e:
-              print(f"  ⚠ Instagram: {e}")
-
-          # Deduplicate hashtags by frequency
-          from collections import Counter
-          tag_counts = Counter(instagram_hashtags)
-          top_hashtags = [t for t, _ in tag_counts.most_common(30)]
-
-          # Send all collected content to Claude for brand analysis
-          print("\n🤖 Analizando con Claude para síntesis de marca...")
-
-          ig_section = ""
-          if instagram_captions:
-              ig_section = "\n\n=== PUBLICACIONES DE INSTAGRAM (@ruta.camp) ===\n"
-              ig_section += "\n---\n".join(instagram_captions[:10])
-
-          combined_text = all_web_text + ig_section
 
           brand_knowledge = {
               "updatedAt": datetime.now(timezone.utc).isoformat(),
-              "brand": {
-                  "name": "Ruta Camp",
-                  "tagline": "",
-                  "description": "",
-                  "values": [],
-                  "offerings": [],
-                  "locations": [],
-                  "audience": "",
-                  "tone": ""
-              },
+              "brand": {"name": "Ruta Camp"},
               "websiteContent": website_content,
-              "instagramInsights": {
-                  "recentCaptions": instagram_captions[:15],
-                  "commonHashtags": top_hashtags,
-                  "contentThemes": []
-              },
+              "instagramInsights": {"recentCaptions": [], "commonHashtags": [], "contentThemes": []},
               "brandSummary": ""
           }
 
           if ANTHROPIC_KEY:
-              prompt = f"""Analiza el siguiente contenido extraído del sitio web y redes sociales de "Ruta Camp", una empresa de turismo outdoor de Chile.
-
-Genera un resumen estructurado de la marca para usarlo como contexto en la generación de contenido para redes sociales. El resumen debe incluir:
-1. Descripción breve de qué es Ruta Camp (1-2 oraciones)
-2. Propuesta de valor y diferenciadores
-3. Destinos y actividades principales que ofrecen
-4. Audiencia objetivo
-5. Tono y estilo de comunicación (analizado de sus publicaciones)
-6. Valores de marca
-7. Frases o palabras clave que usan frecuentemente
-8. Tipos de contenido que publican
-
-Responde en español, de forma concisa y directa. Este resumen se usará en prompts de IA para generar nuevo contenido fiel a la marca.
-
---- CONTENIDO A ANALIZAR ---
-{combined_text[:12000]}
-"""
+              print("\nAnalizando con Claude...")
+              prompt = "Analiza el contenido del sitio web de Ruta Camp y genera un resumen de marca para usar en prompts de IA. Incluye: que es Ruta Camp, destinos, audiencia, tono de comunicacion, valores y palabras clave frecuentes. Responde en espanol, conciso.\n\n--- CONTENIDO ---\n" + all_web_text[:10000]
               try:
-                  import json as _json
-                  payload = _json.dumps({
+                  payload = json.dumps({
                       "model": "claude-haiku-4-5-20251001",
-                      "max_tokens": 1200,
+                      "max_tokens": 1000,
                       "messages": [{"role": "user", "content": prompt}]
                   }).encode()
-
                   req = urllib.request.Request(
                       "https://api.anthropic.com/v1/messages",
                       data=payload,
@@ -186,51 +88,39 @@ Responde en español, de forma concisa y directa. Este resumen se usará en prom
                       method="POST"
                   )
                   with urllib.request.urlopen(req, timeout=60) as resp:
-                      result = _json.loads(resp.read())
-                      summary = result["content"][0]["text"]
-                      brand_knowledge["brandSummary"] = summary
-                      print("  ✅ Resumen de marca generado")
-
-                      # Parse structured fields from summary
-                      brand_knowledge["brand"]["description"] = summary[:500]
+                      result = json.loads(resp.read())
+                      brand_knowledge["brandSummary"] = result["content"][0]["text"]
+                      print("Resumen generado.")
               except Exception as e:
-                  print(f"  ⚠ Claude API: {e}")
-                  brand_knowledge["brandSummary"] = "(sin síntesis — agrega ANTHROPIC_API_KEY en Secrets)"
+                  print("Error Claude API: " + str(e))
+                  brand_knowledge["brandSummary"] = "(sin sintesis - verifica ANTHROPIC_API_KEY)"
           else:
-              print("  ℹ ANTHROPIC_API_KEY no configurada — guardando contenido crudo sin síntesis")
-              brand_knowledge["brandSummary"] = "(sin síntesis — agrega ANTHROPIC_API_KEY en Secrets para análisis automático)"
+              brand_knowledge["brandSummary"] = "(sin sintesis - agrega ANTHROPIC_API_KEY en Secrets)"
 
-          # Save
           with open("data/brand-knowledge.json", "w", encoding="utf-8") as f:
               json.dump(brand_knowledge, f, ensure_ascii=False, indent=2)
 
-          print("\n✅ data/brand-knowledge.json actualizado")
-          print(f"   Sitio web: {sum(1 for v in website_content.values() if v)} páginas")
-          print(f"   Instagram: {len(instagram_captions)} posts, {len(top_hashtags)} hashtags únicos")
+          print("data/brand-knowledge.json actualizado.")
 
-          # GitHub Step Summary
-          summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
-          if summary_path:
-              with open(summary_path, "a") as f:
-                  f.write("## 🧠 Conocimiento de Marca Actualizado\n\n")
-                  f.write(f"- **Fecha:** {brand_knowledge['updatedAt']}\n")
-                  f.write(f"- **Páginas web scrapeadas:** {sum(1 for v in website_content.values() if v)}\n")
-                  f.write(f"- **Posts de Instagram:** {len(instagram_captions)}\n")
-                  f.write(f"- **Hashtags únicos:** {len(top_hashtags)}\n\n")
-                  if brand_knowledge.get("brandSummary") and not brand_knowledge["brandSummary"].startswith("("):
-                      f.write("### Síntesis de Marca\n\n")
-                      f.write(brand_knowledge["brandSummary"][:1500] + "\n")
+          sp = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          if sp:
+              with open(sp, "a") as f:
+                  f.write("## Conocimiento de Marca Actualizado\n\n")
+                  f.write("- **Fecha:** " + brand_knowledge["updatedAt"] + "\n")
+                  f.write("- **Paginas:** " + str(len([v for v in website_content.values() if v])) + "\n\n")
+                  summary = brand_knowledge.get("brandSummary","")
+                  if summary and not summary.startswith("("):
+                      f.write("### Sintesis\n\n" + summary[:1000] + "\n")
           PYEOF
 
       - name: Commit brand knowledge
         run: |
-          git config user.name  "github-actions[bot]"
+          git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/brand-knowledge.json
           if git diff --cached --quiet; then
-            echo "Sin cambios en brand-knowledge.json"
+            echo "Sin cambios."
           else
-            git commit -m "🧠 Actualizar conocimiento de marca [$(date -u +%Y-%m-%d)]"
+            git commit -m "🧠 Actualizar conocimiento de marca"
             git push
-            echo "✅ Commit realizado"
           fi
