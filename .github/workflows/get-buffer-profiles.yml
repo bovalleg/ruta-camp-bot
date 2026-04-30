@@ -38,48 +38,116 @@ jobs:
                   "Accept": "application/json, text/event-stream",
               }, method="POST")
               with urllib.request.urlopen(req, timeout=15) as resp:
-                  return resp.headers.get("Mcp-Session-Id", "")
+                  body = resp.read().decode()
+                  sid = resp.headers.get("Mcp-Session-Id", "")
+              print(f"  Init body: {body[:300]}")
+              return sid
+
+          def parse_mcp_body(body):
+              """Parse MCP response — handles SSE, plain JSON, and empty body."""
+              body = body.strip()
+              if not body:
+                  return {}
+              # SSE format: lines starting with "data:"
+              for line in body.splitlines():
+                  line = line.strip()
+                  if line.startswith("data:"):
+                      chunk = line[5:].strip()
+                      if chunk and chunk != "[DONE]":
+                          try: return json.loads(chunk)
+                          except: pass
+              # Plain JSON
+              try: return json.loads(body)
+              except: pass
+              print(f"  [warn] No se pudo parsear body: {body[:200]}")
+              return {}
 
           def mcp_call(session_id, tool, arguments={}):
               payload = json.dumps({
                   "jsonrpc": "2.0", "id": 2, "method": "tools/call",
                   "params": {"name": tool, "arguments": arguments}
               }).encode()
-              req = urllib.request.Request(MCP_URL, data=payload, headers={
+              headers = {
                   "Authorization": f"Bearer {token}",
                   "Content-Type": "application/json",
                   "Accept": "application/json, text/event-stream",
-                  "Mcp-Session-Id": session_id,
-              }, method="POST")
-              with urllib.request.urlopen(req, timeout=15) as resp:
+              }
+              if session_id:
+                  headers["Mcp-Session-Id"] = session_id
+              req = urllib.request.Request(MCP_URL, data=payload, headers=headers, method="POST")
+              with urllib.request.urlopen(req, timeout=20) as resp:
                   body = resp.read().decode()
-              # Parse SSE or JSON
-              for line in body.splitlines():
-                  if line.startswith("data:"):
-                      try: return json.loads(line[5:].strip())
-                      except: pass
-              return json.loads(body)
+              print(f"  [{tool}] raw: {body[:400]}")
+              return parse_mcp_body(body)
+
+          def extract_content_text(response):
+              """Safely extract the text content from an MCP tool response."""
+              # Try result.content[0].text
+              try:
+                  text = response["result"]["content"][0]["text"]
+                  return text
+              except (KeyError, IndexError, TypeError):
+                  pass
+              # Try result directly
+              try:
+                  return response["result"]
+              except (KeyError, TypeError):
+                  pass
+              return None
 
           print("Conectando al MCP de Buffer...")
           session_id = mcp_init()
-          print(f"Session: {session_id[:16]}...\n")
+          print(f"Session ID: '{session_id}'\n")
 
-          # Get account first (required by MCP)
+          # Get account
           print("Obteniendo cuenta...")
-          acc = mcp_call(session_id, "get_account")
-          acc_content = acc.get("result", {}).get("content", [{}])[0].get("text", "{}")
-          acc_data = json.loads(acc_content) if isinstance(acc_content, str) else acc_content
-          org_id = (acc_data.get("organization") or acc_data.get("account") or {}).get("id", "")
-          print(f"Org ID: {org_id}\n")
+          acc_resp = mcp_call(session_id, "get_account")
+          acc_text = extract_content_text(acc_resp)
+          print(f"  Account text: {str(acc_text)[:300]}")
+
+          org_id = ""
+          if acc_text:
+              if isinstance(acc_text, str):
+                  try:
+                      acc_data = json.loads(acc_text)
+                  except:
+                      acc_data = {}
+              else:
+                  acc_data = acc_text
+              # Try different paths for org ID
+              for path in [["organization","id"], ["account","id"], ["id"]]:
+                  d = acc_data
+                  try:
+                      for k in path: d = d[k]
+                      if d: org_id = str(d); break
+                  except (KeyError, TypeError):
+                      pass
+
+          print(f"  Org ID: '{org_id}'\n")
 
           # List channels
           print("Listando canales...")
           args = {"organizationId": org_id} if org_id else {}
-          result = mcp_call(session_id, "list_channels", args)
-          content = result.get("result", {}).get("content", [{}])[0].get("text", "[]")
-          channels = json.loads(content) if isinstance(content, str) else content
-          if isinstance(channels, dict):
-              channels = channels.get("channels", channels.get("data", []))
+          ch_resp = mcp_call(session_id, "list_channels", args)
+          ch_text = extract_content_text(ch_resp)
+          print(f"  Channels text: {str(ch_text)[:400]}")
+
+          channels = []
+          if ch_text:
+              if isinstance(ch_text, str):
+                  try: ch_data = json.loads(ch_text)
+                  except: ch_data = {}
+              else:
+                  ch_data = ch_text
+              if isinstance(ch_data, list):
+                  channels = ch_data
+              elif isinstance(ch_data, dict):
+                  channels = ch_data.get("channels") or ch_data.get("data") or ch_data.get("items") or []
+
+          if not channels:
+              print("\n⚠ No se encontraron canales. Respuesta completa:")
+              print(json.dumps(ch_resp, indent=2, ensure_ascii=False)[:800])
+              exit(0)
 
           print(f"\n{'='*50}")
           print(f"✅ {len(channels)} canal(es) encontrado(s):\n")
@@ -94,12 +162,9 @@ jobs:
           if summary and channels:
               with open(summary,"a") as f:
                   f.write("## ✅ Canales de Buffer\n\n")
-                  f.write("| Red | Usuario | ID — pégalo en el bot |\n")
-                  f.write("|-----|---------|----------------------|\n")
+                  f.write("| Red | Usuario | ID |\n")
+                  f.write("|-----|---------|----|\n")
                   for c in channels:
                       f.write(f"| {c.get('service','?')} | @{c.get('serviceUsername') or c.get('handle','?')} | `{c.get('id','?')}` |\n")
-                  f.write("\n**Próximo paso:**\n")
-                  f.write("1. Copia el ID del canal de Instagram\n")
-                  f.write("2. Agrégalo en Secrets: `BUFFER_PROFILE_ID`\n")
-                  f.write("3. Pégalo en ⚙️ Configuración del bot → 'ID de Perfil'\n")
+                  f.write("\n**Próximo paso:** copia el ID de Instagram → GitHub Secrets → `BUFFER_PROFILE_ID`\n")
           PYEOF
