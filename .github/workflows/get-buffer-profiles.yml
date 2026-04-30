@@ -80,37 +80,70 @@ jobs:
               print("ERROR: no se pudo iniciar sesion MCP")
               exit(1)
 
+          def extract_text(parsed):
+              try:
+                  return parsed["result"]["content"][0]["text"]
+              except (KeyError, IndexError, TypeError):
+                  return ""
+
+          print("\n--- GET ACCOUNT ---")
+          body_acc, _, status_acc = post_mcp({
+              "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+              "params": {"name": "get_account", "arguments": {}}
+          }, session_id=session_id)
+          print("Status: " + str(status_acc))
+          print("Body: " + body_acc[:800])
+
+          parsed_acc = safe_json(body_acc)
+          acc_text = extract_text(parsed_acc)
+          print("Account text: " + acc_text[:400])
+
+          org_id = ""
+          try:
+              acc_data = json.loads(acc_text) if acc_text else {}
+              for path in [["organization","id"], ["account","organization","id"], ["id"]]:
+                  d = acc_data
+                  ok = True
+                  for k in path:
+                      if isinstance(d, dict) and k in d:
+                          d = d[k]
+                      else:
+                          ok = False
+                          break
+                  if ok and d and isinstance(d, str):
+                      org_id = d
+                      break
+          except Exception as ex:
+              print("Error parseando account: " + str(ex))
+
+          print("Org ID encontrado: " + repr(org_id))
+
+          if not org_id:
+              print("ERROR: no se pudo obtener organizationId. Body completo:")
+              print(body_acc)
+              exit(1)
+
           print("\n--- LIST CHANNELS ---")
           body2, _, status2 = post_mcp({
-              "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-              "params": {"name": "list_channels", "arguments": {}}
+              "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+              "params": {"name": "list_channels", "arguments": {"organizationId": org_id}}
           }, session_id=session_id)
           print("Status: " + str(status2))
           print("Body: " + body2[:800])
 
           parsed = safe_json(body2)
-          print("Parsed keys: " + str(list(parsed.keys())))
+          ch_text = extract_text(parsed)
+          print("Channels text: " + ch_text[:400])
 
           channels = []
           try:
-              content_list = parsed.get("result", {}).get("content", [])
-              for item in content_list:
-                  text = item.get("text", "")
-                  if not text:
-                      continue
-                  try:
-                      data = json.loads(text)
-                  except:
-                      data = {}
-                  if isinstance(data, list):
-                      channels = data
-                      break
-                  elif isinstance(data, dict):
-                      for key in ["channels", "data", "items", "nodes"]:
-                          if key in data and isinstance(data[key], list):
-                              channels = data[key]
-                              break
-                      if channels:
+              ch_data = json.loads(ch_text) if ch_text else {}
+              if isinstance(ch_data, list):
+                  channels = ch_data
+              elif isinstance(ch_data, dict):
+                  for key in ["channels", "data", "items", "nodes"]:
+                      if key in ch_data and isinstance(ch_data[key], list):
+                          channels = ch_data[key]
                           break
           except Exception as ex:
               print("Error extrayendo canales: " + str(ex))
