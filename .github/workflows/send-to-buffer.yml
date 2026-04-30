@@ -11,42 +11,106 @@ on:
         required: false
         default: ""
       scheduled_at:
-        description: "Fecha ISO 8601 (ej: 2026-05-01T12:00:00Z). Vacio = agregar a queue."
+        description: "Fecha ISO 8601 (ej: 2026-05-01T12:00:00Z). Vacio = queue automatico."
         required: false
         default: ""
       post_type:
-        description: "Tipo de contenido"
+        description: "Tipo: post | reel | story"
         required: false
         default: "post"
+      image_id:
+        description: "ID del archivo en Google Drive (opcional)"
+        required: false
+        default: ""
+      image_name:
+        description: "Nombre del archivo de imagen (opcional)"
+        required: false
+        default: ""
 
 jobs:
   send:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Enviar a Buffer via MCP
         env:
-          BUFFER_TOKEN:   ${{ secrets.BUFFER_TOKEN }}
-          BUFFER_PROFILE: ${{ secrets.BUFFER_PROFILE_ID }}
+          BUFFER_TOKEN:    ${{ secrets.BUFFER_TOKEN }}
+          BUFFER_PROFILE:  ${{ secrets.BUFFER_PROFILE_ID }}
+          GOOGLE_API_KEY:  ${{ secrets.GOOGLE_API_KEY }}
         run: |
           python3 - <<'PYEOF'
-          import os, urllib.request, urllib.error, json
+          import os, urllib.request, urllib.error, urllib.parse, json, re, mimetypes
 
-          token    = os.environ.get("BUFFER_TOKEN", "").strip()
-          channel  = os.environ.get("BUFFER_PROFILE", "").strip()
-          caption  = """${{ inputs.caption }}"""
-          hashtags = """${{ inputs.hashtags }}"""
-          sched    = "${{ inputs.scheduled_at }}".strip()
-          MCP_URL  = "https://mcp.buffer.com/mcp"
+          token      = os.environ.get("BUFFER_TOKEN", "").strip()
+          channel    = os.environ.get("BUFFER_PROFILE", "").strip()
+          google_key = os.environ.get("GOOGLE_API_KEY", "").strip()
+          caption    = """${{ inputs.caption }}"""
+          hashtags   = """${{ inputs.hashtags }}"""
+          sched      = "${{ inputs.scheduled_at }}".strip()
+          post_type  = "${{ inputs.post_type }}".strip() or "post"
+          image_id   = "${{ inputs.image_id }}".strip()
+          image_name = "${{ inputs.image_name }}".strip()
+          MCP_URL    = "https://mcp.buffer.com/mcp"
+          GH_REPO    = os.environ.get("GITHUB_REPOSITORY", "bovalleg/ruta-camp-bot")
 
           text = caption.strip()
           if hashtags.strip():
               text += "\n\n" + hashtags.strip()
 
-          print("Canal configurado: " + (channel or "(sin ID — se buscara automaticamente)"))
-          print("Texto: " + text[:100])
-          if sched:
-              print("Programado: " + sched)
+          print("Canal: " + (channel or "(auto)"))
+          print("Imagen Drive ID: " + (image_id or "(ninguna)"))
+          print("Texto: " + text[:80] + "...")
 
+          # ── Descargar imagen de Google Drive y publicar en GitHub Pages ──
+          public_image_url = ""
+          if image_id and google_key:
+              print("\n📥 Descargando imagen de Google Drive...")
+              try:
+                  # Obtener metadata del archivo
+                  meta_url = "https://www.googleapis.com/drive/v3/files/" + image_id + "?fields=name,mimeType,size&key=" + google_key
+                  req = urllib.request.Request(meta_url)
+                  with urllib.request.urlopen(req, timeout=15) as r:
+                      meta = json.loads(r.read())
+                  fname = meta.get("name", image_name or (image_id + ".jpg"))
+                  mime  = meta.get("mimeType", "image/jpeg")
+                  print("  Archivo: " + fname + " (" + mime + ")")
+
+                  # Descargar contenido
+                  dl_url = "https://www.googleapis.com/drive/v3/files/" + image_id + "?alt=media&key=" + google_key
+                  req2 = urllib.request.Request(dl_url)
+                  with urllib.request.urlopen(req2, timeout=30) as r2:
+                      img_bytes = r2.read()
+                  print("  Descargado: " + str(len(img_bytes)) + " bytes")
+
+                  # Guardar en media/ para que GitHub Pages lo sirva
+                  safe_name = re.sub(r'[^a-zA-Z0-9._-]', '_', fname)
+                  media_path = "media/" + safe_name
+                  os.makedirs("media", exist_ok=True)
+                  with open(media_path, "wb") as f:
+                      f.write(img_bytes)
+
+                  public_image_url = "https://" + GH_REPO.split("/")[0] + ".github.io/" + GH_REPO.split("/")[1] + "/" + media_path
+                  print("  URL publica: " + public_image_url)
+
+              except Exception as e:
+                  print("  ⚠ No se pudo descargar imagen: " + str(e))
+                  print("  (el archivo de Drive puede ser privado — usa 'Cualquiera con el enlace' en Drive)")
+
+          # Hacer commit de la imagen si se descargo
+          if public_image_url:
+              os.system('git config user.name "github-actions[bot]"')
+              os.system('git config user.email "github-actions[bot]@users.noreply.github.com"')
+              os.system('git add media/')
+              result = os.system('git diff --cached --quiet || git commit -m "📸 Imagen para post de Buffer"')
+              os.system('git push')
+              print("Imagen publicada en GitHub Pages")
+              import time; time.sleep(5)  # Esperar que GitHub Pages indexe
+
+          # ── MCP helpers ──
           def post_mcp(payload_dict, session_id=None):
               data = json.dumps(payload_dict).encode()
               headers = {
@@ -76,110 +140,104 @@ jobs:
                   if line.startswith("data:"):
                       chunk = line[5:].strip()
                       if chunk and chunk != "[DONE]":
-                          try:
-                              return json.loads(chunk)
-                          except:
-                              pass
-              try:
-                  return json.loads(text)
-              except:
-                  pass
+                          try: return json.loads(chunk)
+                          except: pass
+              try: return json.loads(text)
+              except: pass
               return {}
 
           def extract_text(parsed):
-              try:
-                  return parsed["result"]["content"][0]["text"]
-              except (KeyError, IndexError, TypeError):
-                  return ""
+              try: return parsed["result"]["content"][0]["text"]
+              except (KeyError, IndexError, TypeError): return ""
 
-          # Init
+          # ── Init MCP ──
           body, session_id, status = post_mcp({
               "jsonrpc": "2.0", "id": 1, "method": "initialize",
-              "params": {
-                  "protocolVersion": "2024-11-05",
-                  "capabilities": {},
-                  "clientInfo": {"name": "ruta-camp-bot", "version": "1.0"}
-              }
+              "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                         "clientInfo": {"name": "ruta-camp-bot", "version": "1.0"}}
           })
           if status not in (200, 201, 202):
-              print("ERROR init MCP: " + str(status))
-              exit(1)
-          print("MCP conectado.")
+              print("ERROR init MCP: " + str(status)); exit(1)
+          print("\nMCP conectado.")
 
-          # Si no hay channel, obtenerlo via get_account + list_channels
-          if not channel:
-              print("Buscando canal automaticamente...")
-              body_acc, _, _ = post_mcp({
-                  "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                  "params": {"name": "get_account", "arguments": {}}
-              }, session_id=session_id)
-              acc_text = extract_text(safe_json(body_acc))
-              org_id = ""
+          # ── Obtener org_id ──
+          body_acc, _, _ = post_mcp({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+              "params": {"name": "get_account", "arguments": {}}}, session_id=session_id)
+          acc_text = extract_text(safe_json(body_acc))
+          org_id = ""
+          try:
+              acc_data = json.loads(acc_text) if acc_text else {}
+              orgs = acc_data.get("organizations", [])
+              if orgs: org_id = orgs[0].get("id", "")
+          except: pass
+
+          # ── Auto-detectar canal si no hay BUFFER_PROFILE_ID ──
+          if not channel and org_id:
+              body_ch, _, _ = post_mcp({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                  "params": {"name": "list_channels", "arguments": {"organizationId": org_id}}},
+                  session_id=session_id)
+              ch_text = extract_text(safe_json(body_ch))
               try:
-                  acc_data = json.loads(acc_text) if acc_text else {}
-                  orgs = acc_data.get("organizations", [])
-                  if orgs:
-                      org_id = orgs[0].get("id", "")
-              except:
-                  pass
-
-              if org_id:
-                  body_ch, _, _ = post_mcp({
-                      "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                      "params": {"name": "list_channels", "arguments": {"organizationId": org_id}}
-                  }, session_id=session_id)
-                  ch_text = extract_text(safe_json(body_ch))
-                  try:
-                      channels = json.loads(ch_text) if ch_text else []
-                      if channels:
-                          channel = channels[0].get("id", "")
-                          print("Canal encontrado: " + channels[0].get("name","?") + " (" + channel + ")")
-                  except:
-                      pass
+                  channels = json.loads(ch_text) if ch_text else []
+                  if channels: channel = channels[0].get("id", "")
+              except: pass
 
           if not channel:
-              print("ERROR: no se encontro canal de Buffer. Configura BUFFER_PROFILE_ID en Secrets.")
-              exit(1)
+              print("ERROR: no se encontro canal de Buffer."); exit(1)
 
-          # Crear post
-          print("\nCreando post en Buffer...")
-          args = {
-              "channelId": channel,
-              "text": text,
-              "schedulingType": "automatic",
-          }
-          if sched:
-              # Aceptar ISO 8601 o Unix timestamp
-              if sched.isdigit():
-                  import datetime
-                  iso = datetime.datetime.utcfromtimestamp(int(sched)).strftime('%Y-%m-%dT%H:%M:%SZ')
-                  args["scheduledAt"] = iso
-              else:
-                  args["scheduledAt"] = sched
+          # ── Crear post o idea según si hay imagen ──
+          next_id = 4
+          if public_image_url:
+              print("\n📤 Creando post con imagen en Buffer...")
+              post_args = {
+                  "channelId": channel,
+                  "text": text,
+                  "schedulingType": "automatic",
+                  "mediaUrls": [public_image_url],
+                  "instagramOptions": {"postType": post_type if post_type in ("post","reel","story") else "post"},
+              }
+              if sched:
+                  if sched.isdigit():
+                      import datetime
+                      sched = datetime.datetime.fromtimestamp(int(sched), tz=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                  post_args["scheduledAt"] = sched
 
-          body_post, _, status_post = post_mcp({
-              "jsonrpc": "2.0", "id": 4, "method": "tools/call",
-              "params": {"name": "create_post", "arguments": args}
-          }, session_id=session_id)
-          print("Status: " + str(status_post))
-          print("Body: " + body_post[:600])
+              body_r, _, _ = post_mcp({"jsonrpc": "2.0", "id": next_id, "method": "tools/call",
+                  "params": {"name": "create_post", "arguments": post_args}}, session_id=session_id)
+              result_text = extract_text(safe_json(body_r))
+              print("Respuesta create_post: " + result_text[:400])
 
-          post_text = extract_text(safe_json(body_post))
-          print("Respuesta: " + post_text[:400])
+              # Si falla con imagen, intentar igual sin mediaUrls (fallback)
+              if '"isError":true' in body_r or "error" in result_text.lower():
+                  print("\n⚠ create_post falló — intentando create_idea como fallback...")
+                  public_image_url = ""  # para que caiga en el bloque de idea abajo
+
+          if not public_image_url:
+              print("\n📝 Creando idea en Buffer (sin imagen — agrégala manualmente en Buffer)...")
+              if not org_id:
+                  print("ERROR: falta org_id"); exit(1)
+              idea_args = {
+                  "organizationId": org_id,
+                  "content": {"text": text, "channelId": channel}
+              }
+              body_r, _, _ = post_mcp({"jsonrpc": "2.0", "id": next_id+1, "method": "tools/call",
+                  "params": {"name": "create_idea", "arguments": idea_args}}, session_id=session_id)
+              result_text = extract_text(safe_json(body_r))
+              print("Respuesta create_idea: " + result_text[:400])
 
           try:
-              post_data = json.loads(post_text) if post_text else {}
-              post_id = post_data.get("id") or post_data.get("post", {}).get("id", "?")
-          except:
-              post_id = "?"
+              rd = json.loads(result_text) if result_text else {}
+              post_id = rd.get("id") or rd.get("post", rd.get("idea", {})).get("id", "?")
+          except: post_id = "?"
 
-          print("\n✅ Post enviado a Buffer! ID: " + str(post_id))
+          print("\n✅ Enviado a Buffer! ID: " + str(post_id))
 
           summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
           if summary_path:
               with open(summary_path, "a") as f:
                   f.write("## Post enviado a Buffer\n\n")
                   f.write("- **Canal:** `" + channel + "`\n")
+                  f.write("- **Imagen:** " + (public_image_url or "sin imagen (idea)") + "\n")
                   f.write("- **Programado:** " + (sched or "queue automatico") + "\n\n")
                   f.write("**Texto:**\n\n" + text[:400] + "\n")
           PYEOF

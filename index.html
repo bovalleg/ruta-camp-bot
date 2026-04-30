@@ -1123,6 +1123,8 @@ async function sendToBuffer(post) {
     hashtags:     post.hashtags  || '',
     scheduled_at: post.scheduledAt ? new Date(post.scheduledAt).toISOString() : '',
     post_type:    post.type      || 'post',
+    image_id:     post.imageId   || '',
+    image_name:   post.imageName || '',
   });
   return r;
 }
