@@ -1,0 +1,127 @@
+name: 🧪 Probar Buffer MCP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probar conexión al MCP de Buffer
+        env:
+          BUFFER_TOKEN: ${{ secrets.BUFFER_TOKEN }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, urllib.request, urllib.error, json
+
+          token = os.environ.get("BUFFER_TOKEN", "").strip()
+          MCP_URL = "https://mcp.buffer.com/mcp"
+
+          print(f"Token: {token[:8]}...{token[-4:]} ({len(token)} chars)")
+          print(f"Endpoint: {MCP_URL}\n")
+
+          def mcp_call(method, params=None, session_id=None):
+              payload = json.dumps({
+                  "jsonrpc": "2.0",
+                  "id": 1,
+                  "method": method,
+                  "params": params or {}
+              }).encode()
+              headers = {
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/json",
+                  "Accept": "application/json, text/event-stream",
+              }
+              if session_id:
+                  headers["Mcp-Session-Id"] = session_id
+              req = urllib.request.Request(MCP_URL, data=payload, headers=headers, method="POST")
+              try:
+                  with urllib.request.urlopen(req, timeout=15) as resp:
+                      body = resp.read().decode()
+                      sid = resp.headers.get("Mcp-Session-Id", "")
+                      return body, sid, resp.status
+              except urllib.error.HTTPError as e:
+                  body = e.read().decode()
+                  return None, None, e.code, body
+
+          # Step 1: Initialize
+          print("1️⃣  Inicializando sesión MCP...")
+          result = mcp_call("initialize", {
+              "protocolVersion": "2024-11-05",
+              "capabilities": {},
+              "clientInfo": {"name": "ruta-camp-bot", "version": "1.0"}
+          })
+
+          if len(result) == 4:
+              print(f"❌ HTTP {result[2]}: {result[3][:300]}")
+              exit(1)
+
+          body, session_id, status = result
+          print(f"   Status: {status}")
+          print(f"   Session ID: {session_id or '(ninguno)'}")
+
+          # Try to parse SSE or JSON
+          data = None
+          for line in body.splitlines():
+              if line.startswith("data:"):
+                  try:
+                      data = json.loads(line[5:].strip())
+                      break
+                  except:
+                      pass
+          if not data:
+              try:
+                  data = json.loads(body)
+              except:
+                  pass
+
+          if data:
+              print(f"   Respuesta: {json.dumps(data, indent=2)[:400]}")
+          else:
+              print(f"   Cuerpo raw: {body[:400]}")
+
+          if status not in (200, 201):
+              print("\n❌ No se pudo conectar al MCP de Buffer desde GitHub Actions")
+              exit(1)
+
+          print("\n✅ Conexión exitosa!\n")
+
+          # Step 2: List tools
+          print("2️⃣  Listando herramientas disponibles...")
+          result2 = mcp_call("tools/list", session_id=session_id)
+
+          if len(result2) == 4:
+              print(f"❌ HTTP {result2[2]}: {result2[3][:300]}")
+          else:
+              body2, _, status2 = result2
+              data2 = None
+              for line in body2.splitlines():
+                  if line.startswith("data:"):
+                      try:
+                          data2 = json.loads(line[5:].strip())
+                          break
+                      except:
+                          pass
+              if not data2:
+                  try:
+                      data2 = json.loads(body2)
+                  except:
+                      pass
+
+              if data2:
+                  tools = data2.get("result", {}).get("tools", [])
+                  print(f"\n   Herramientas disponibles ({len(tools)}):")
+                  for t in tools:
+                      print(f"   • {t.get('name')}: {t.get('description','')[:100]}")
+
+                  summary = os.environ.get("GITHUB_STEP_SUMMARY","")
+                  if summary:
+                      with open(summary,"a") as f:
+                          f.write("## ✅ Buffer MCP funciona desde GitHub Actions!\n\n")
+                          f.write(f"**Herramientas disponibles:**\n\n")
+                          for t in tools:
+                              f.write(f"- `{t.get('name')}`: {t.get('description','')[:120]}\n")
+              else:
+                  print(f"   Raw: {body2[:400]}")
+
+          PYEOF
