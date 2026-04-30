@@ -1,4 +1,4 @@
-name: 🔍 Ver Canales de Buffer
+name: "\U0001F50D Ver Canales de Buffer"
 
 on:
   workflow_dispatch:
@@ -11,138 +11,128 @@ jobs:
         env:
           BUFFER_TOKEN: ${{ secrets.BUFFER_TOKEN }}
         run: |
-          python3 <<'PYEOF'
-import os, urllib.request, urllib.error, json
+          python3 - <<'PYEOF'
+          import os, urllib.request, urllib.error, json
 
-token = os.environ.get("BUFFER_TOKEN", "").strip()
-MCP_URL = "https://mcp.buffer.com/mcp"
+          token = os.environ.get("BUFFER_TOKEN", "").strip()
+          MCP_URL = "https://mcp.buffer.com/mcp"
 
-if not token:
-    print("ERROR: BUFFER_TOKEN vacio")
-    exit(1)
+          if not token:
+              print("ERROR: BUFFER_TOKEN vacio")
+              exit(1)
 
-print("Token: " + token[:8] + "..." + token[-4:])
+          print("Token: " + token[:8] + "..." + token[-4:])
 
-def post_mcp(payload_dict, session_id=None):
-    data = json.dumps(payload_dict).encode()
-    headers = {
-        "Authorization": "Bearer " + token,
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
-    }
-    if session_id:
-        headers["Mcp-Session-Id"] = session_id
-    req = urllib.request.Request(MCP_URL, data=data, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            body = resp.read().decode()
-            sid = resp.headers.get("Mcp-Session-Id", "")
-            return body, sid, resp.status
-    except urllib.error.HTTPError as e:
-        body = e.read().decode()
-        print("HTTP ERROR " + str(e.code) + ": " + body[:300])
-        return "", "", e.code
+          def post_mcp(payload_dict, session_id=None):
+              data = json.dumps(payload_dict).encode()
+              headers = {
+                  "Authorization": "Bearer " + token,
+                  "Content-Type": "application/json",
+                  "Accept": "application/json, text/event-stream",
+              }
+              if session_id:
+                  headers["Mcp-Session-Id"] = session_id
+              req = urllib.request.Request(MCP_URL, data=data, headers=headers, method="POST")
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as resp:
+                      body = resp.read().decode()
+                      sid = resp.headers.get("Mcp-Session-Id", "")
+                      return body, sid, resp.status
+              except urllib.error.HTTPError as e:
+                  body = e.read().decode()
+                  print("HTTP ERROR " + str(e.code) + ": " + body[:300])
+                  return "", "", e.code
 
-def safe_json(text):
-    if not text or not text.strip():
-        return {}
-    text = text.strip()
-    # Try SSE lines first
-    for line in text.splitlines():
-        line = line.strip()
-        if line.startswith("data:"):
-            chunk = line[5:].strip()
-            if chunk and chunk != "[DONE]":
-                try:
-                    return json.loads(chunk)
-                except:
-                    pass
-    # Try plain JSON
-    try:
-        return json.loads(text)
-    except:
-        pass
-    return {"_raw": text[:500]}
+          def safe_json(text):
+              if not text or not text.strip():
+                  return {}
+              text = text.strip()
+              for line in text.splitlines():
+                  line = line.strip()
+                  if line.startswith("data:"):
+                      chunk = line[5:].strip()
+                      if chunk and chunk != "[DONE]":
+                          try:
+                              return json.loads(chunk)
+                          except:
+                              pass
+              try:
+                  return json.loads(text)
+              except:
+                  pass
+              print("  [warn] no se pudo parsear: " + text[:200])
+              return {}
 
-# 1. Initialize
-print("\n--- INIT ---")
-body, session_id, status = post_mcp({
-    "jsonrpc": "2.0", "id": 1, "method": "initialize",
-    "params": {
-        "protocolVersion": "2024-11-05",
-        "capabilities": {},
-        "clientInfo": {"name": "ruta-camp-bot", "version": "1.0"}
-    }
-})
-print("Status: " + str(status))
-print("Session-Id: " + repr(session_id))
-print("Body: " + body[:300])
+          print("\n--- INIT ---")
+          body, session_id, status = post_mcp({
+              "jsonrpc": "2.0", "id": 1, "method": "initialize",
+              "params": {
+                  "protocolVersion": "2024-11-05",
+                  "capabilities": {},
+                  "clientInfo": {"name": "ruta-camp-bot", "version": "1.0"}
+              }
+          })
+          print("Status: " + str(status))
+          print("Session-Id: " + repr(session_id))
+          print("Body: " + body[:400])
 
-if status not in (200, 201, 202):
-    print("ERROR: no se pudo iniciar sesion MCP")
-    exit(1)
+          if status not in (200, 201, 202):
+              print("ERROR: no se pudo iniciar sesion MCP")
+              exit(1)
 
-# 2. list_channels (sin argumentos primero)
-print("\n--- LIST CHANNELS (sin args) ---")
-body2, _, status2 = post_mcp({
-    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-    "params": {"name": "list_channels", "arguments": {}}
-}, session_id=session_id)
-print("Status: " + str(status2))
-print("Body: " + body2[:600])
+          print("\n--- LIST CHANNELS ---")
+          body2, _, status2 = post_mcp({
+              "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+              "params": {"name": "list_channels", "arguments": {}}
+          }, session_id=session_id)
+          print("Status: " + str(status2))
+          print("Body: " + body2[:800])
 
-parsed = safe_json(body2)
-print("Parsed: " + json.dumps(parsed, indent=2, ensure_ascii=False)[:600])
+          parsed = safe_json(body2)
+          print("Parsed keys: " + str(list(parsed.keys())))
 
-# Try to extract channels
-channels = []
-try:
-    content = parsed["result"]["content"]
-    for item in content:
-        text = item.get("text", "")
-        if text:
-            data = json.loads(text) if isinstance(text, str) else text
-            if isinstance(data, list):
-                channels = data
-                break
-            elif isinstance(data, dict):
-                for key in ["channels", "data", "items", "nodes"]:
-                    if key in data:
-                        channels = data[key]
-                        break
-                if channels:
-                    break
-except Exception as ex:
-    print("Error extrayendo canales: " + str(ex))
+          channels = []
+          try:
+              content_list = parsed.get("result", {}).get("content", [])
+              for item in content_list:
+                  text = item.get("text", "")
+                  if not text:
+                      continue
+                  try:
+                      data = json.loads(text)
+                  except:
+                      data = {}
+                  if isinstance(data, list):
+                      channels = data
+                      break
+                  elif isinstance(data, dict):
+                      for key in ["channels", "data", "items", "nodes"]:
+                          if key in data and isinstance(data[key], list):
+                              channels = data[key]
+                              break
+                      if channels:
+                          break
+          except Exception as ex:
+              print("Error extrayendo canales: " + str(ex))
 
-if not channels:
-    # 3. Fallback: get_account para obtener org_id
-    print("\n--- GET ACCOUNT (para org_id) ---")
-    body3, _, status3 = post_mcp({
-        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-        "params": {"name": "get_account", "arguments": {}}
-    }, session_id=session_id)
-    print("Body: " + body3[:600])
-    parsed3 = safe_json(body3)
-    print("Parsed: " + json.dumps(parsed3, indent=2, ensure_ascii=False)[:400])
-
-print("\n=== RESULTADO ===")
-if channels:
-    print("Canales encontrados: " + str(len(channels)))
-    for c in channels:
-        print("  ID:      " + str(c.get("id", "?")))
-        print("  Red:     " + str(c.get("service", "?")))
-        print("  Nombre:  " + str(c.get("name") or c.get("displayName", "?")))
-        print("  Usuario: @" + str(c.get("serviceUsername") or c.get("handle", "?")))
-        print("  ---")
-
-    summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
-    if summary_path:
-        with open(summary_path, "a") as f:
-            f.write("## Canales de Buffer\n\n")
-            f.write("| Red | Usuario | ID |\n|-----|---------|----|\n")
-            for c in channels:
-                f.write("| " + str(c.get("service","?")) + " | @" + str(c.get("serviceUsername") or c.get("handle","?")) + " | `" + str(c.get("id","?")) + "` |\n")
-else:
-    print("No se encontraron canales. Revisa los logs de arriba.")
-PYEOF
+          print("\n=== RESULTADO ===")
+          if channels:
+              print("Canales: " + str(len(channels)))
+              for c in channels:
+                  print("  ID:      " + str(c.get("id", "?")))
+                  print("  Red:     " + str(c.get("service", "?")))
+                  print("  Nombre:  " + str(c.get("name") or c.get("displayName", "?")))
+                  print("  Usuario: @" + str(c.get("serviceUsername") or c.get("handle", "?")))
+                  print("  ---")
+              summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+              if summary_path:
+                  with open(summary_path, "a") as f:
+                      f.write("## Canales de Buffer\n\n")
+                      f.write("| Red | Usuario | ID |\n|-----|---------|----|\n")
+                      for c in channels:
+                          f.write("| " + str(c.get("service","?")) + " | @" + str(c.get("serviceUsername") or c.get("handle","?")) + " | `" + str(c.get("id","?")) + "` |\n")
+                      f.write("\nCopia el ID de Instagram y guardalo en Secrets como BUFFER_PROFILE_ID\n")
+          else:
+              print("No se encontraron canales. Body completo:")
+              print(body2)
+          PYEOF
