@@ -143,9 +143,19 @@ jobs:
 
           # Crear post
           print("\nCreando post en Buffer...")
-          args = {"channelId": channel, "text": text}
+          args = {
+              "channelId": channel,
+              "text": text,
+              "schedulingType": "automatic",
+          }
           if sched:
-              args["scheduledAt"] = sched
+              # Aceptar ISO 8601 o Unix timestamp
+              if sched.isdigit():
+                  import datetime
+                  iso = datetime.datetime.utcfromtimestamp(int(sched)).strftime('%Y-%m-%dT%H:%M:%SZ')
+                  args["scheduledAt"] = iso
+              else:
+                  args["scheduledAt"] = sched
 
           body_post, _, status_post = post_mcp({
               "jsonrpc": "2.0", "id": 4, "method": "tools/call",
