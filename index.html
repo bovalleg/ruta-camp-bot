@@ -1112,8 +1112,14 @@ async function dispatchWorkflow(workflow, inputs = {}) {
       },
       body: JSON.stringify({ ref: 'main', inputs }),
     });
-    return { ok: r.status === 204 };
+    if (!r.ok) {
+      let body = '';
+      try { body = await r.text(); } catch {}
+      console.error(`[dispatchWorkflow] ${workflow} → HTTP ${r.status}`, body);
+    }
+    return { ok: r.status === 204, status: r.status };
   } catch (e) {
+    console.error('[dispatchWorkflow] error:', e.message);
     return { ok: false, error: e.message };
   }
 }
@@ -1144,7 +1150,8 @@ async function triggerBrandScrape() {
     if (el) el.textContent = '⏳ Actualizando... (recarga en ~2 min)';
     setTimeout(() => window.open(`https://github.com/${GH_REPO}/actions`, '_blank'), 800);
   } else {
-    toast('Error al lanzar el scraper. Verifica tu GitHub Token', 'error');
+    toast(`Error al lanzar el scraper (HTTP ${r.status || '?'}) — revisa la consola del navegador`, 'error');
+    console.error('Fallo dispatchWorkflow scrape-brand.yml, status:', r.status);
   }
   btn.disabled = false;
   btn.textContent = '🔍 Actualizar conocimiento de marca';
