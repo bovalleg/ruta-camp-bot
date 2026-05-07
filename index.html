@@ -1048,66 +1048,54 @@ function detectTypeFromMessage(msg) {
   return null;
 }
 
-// Encontrar diseños que coincidan con tipo y destino
-// Devuelve { type, files } si hay match, { type:'no_match', available, reqType } si no hay coincidencia exacta
-function findMatchingDesigns(userMsg, type) {
-  const parsed = S.outputBotFiles
-    .map(parseOutputBotFile)
-    .filter(Boolean);
+// Encontrar diseños que coincidan con tipo y destino.
+// usedIds: Set de IDs ya usados (para no repetir en lotes).
+// Siempre devuelve algo si hay archivos del tipo correcto (con fallback a cualquier destino).
+function findMatchingDesigns(contextText, type, usedIds = new Set()) {
+  const parsed = S.outputBotFiles.map(parseOutputBotFile).filter(Boolean);
 
-  // Normalizar tipo solicitado
   const reqType = type === 'carousel' ? 'carrusel'
-    : type === 'story'   ? 'story'
-    : type === 'reel'    ? 'reel'
+    : type === 'story'  ? 'story'
+    : type === 'reel'   ? 'reel'
     : 'post';
 
-  // Filtrar por tipo
-  const byType = parsed.filter(f => f.type === reqType);
-  if (!byType.length) return { type: 'no_match', reqType, available: [] };
+  // Filtrar por tipo, excluir ya usados
+  const byType = parsed.filter(f => f.type === reqType && !usedIds.has(f.id));
+  if (!byType.length) {
+    // Intentar sin excluir usados (si no queda nada nuevo)
+    const any = parsed.filter(f => f.type === reqType);
+    if (!any.length) return null; // No hay archivos de este tipo
+    byType.push(...any);
+  }
 
-  const destMatch = detectDestination(userMsg);
+  const destMatch = detectDestination(contextText);
 
-  // Puntuar: destino exacto → 10 pts; 'red' como fallback → 2 pts; resto → 0
+  // Puntuar: destino exacto → 10; 'red' → 3; cualquier otro → 1 (siempre algo)
   const scored = byType.map(f => ({
     ...f,
     score: (destMatch && f.destination === destMatch) ? 10
-         : (f.destination === 'red') ? 2 : 0,
+         : (f.destination === 'red') ? 3 : 1,
   }));
 
-  // Destinos disponibles (para mensaje informativo)
-  const available = [...new Set(byType.map(f => f.destination))];
-
   if (reqType === 'carrusel') {
-    // Agrupar por destino+timestamp (= mismo carrusel)
     const groups = {};
     scored.forEach(f => {
       const k = f.destination + '_' + f.timestamp;
-      if (!groups[k]) groups[k] = { score: f.score, destination: f.destination, files: [] };
-      // El score del grupo es el máximo de sus slides
+      if (!groups[k]) groups[k] = { score: 0, files: [] };
       groups[k].score = Math.max(groups[k].score, f.score);
       groups[k].files.push(f);
     });
-
-    const sortedGroups = Object.values(groups)
-      .sort((a, b) => b.score - a.score || b.files[0].timestamp.localeCompare(a.files[0].timestamp));
-
-    const best = sortedGroups[0];
-
-    // Solo aceptar si hay coincidencia real (score > 0)
-    if (!best || best.score === 0) {
-      return { type: 'no_match', reqType, available, destRequested: destMatch };
-    }
-
+    const best = Object.values(groups)
+      .sort((a, b) => b.score - a.score || b.files[0].timestamp.localeCompare(a.files[0].timestamp))[0];
+    if (!best) return null;
     best.files.sort((a, b) => a.order - b.order);
-    return { type: 'carousel', files: best.files };
+    best.files.forEach(f => usedIds.add(f.id));
+    return { type: 'carousel', files: best.files, isFallback: best.score < 10 };
   } else {
-    // Post/story/reel: mejor archivo con score > 0
-    const sorted = scored.sort((a, b) => b.score - a.score || b.timestamp.localeCompare(a.timestamp));
-    const best = sorted[0];
-    if (!best || best.score === 0) {
-      return { type: 'no_match', reqType, available, destRequested: destMatch };
-    }
-    return { type: reqType, files: [best] };
+    const best = scored.sort((a, b) => b.score - a.score || b.timestamp.localeCompare(a.timestamp))[0];
+    if (!best) return null;
+    usedIds.add(best.id);
+    return { type: reqType, files: [best], isFallback: best.score < 10 };
   }
 }
 
@@ -1211,110 +1199,87 @@ async function send() {
 }
 
 async function sendWithDesignBot(userText, typeLabelIn, loadEl) {
-  let typeLabel = typeLabelIn;
-  // 1. Recargar archivos del Output Bot si está vacío
+  // 1. Cargar archivos del Output Bot si aún no están
   if (!S.outputBotFiles.length) await loadOutputBotFiles();
 
-  // 2. Detectar tipo desde el mensaje (tiene prioridad sobre el chip seleccionado)
-  const detectedType = detectTypeFromMessage(userText) || S.type;
-  if (detectedType !== S.type) {
-    // Sincronizar el chip de tipo con lo que se detectó
-    document.querySelectorAll('.type-chip').forEach(c => {
-      c.classList.toggle('on', c.dataset.t === detectedType);
-    });
-    S.type = detectedType;
-    typeLabel = { post:'post', reel:'reel', story:'historia', carousel:'carrusel' }[detectedType] || detectedType;
-  }
-
-  // 3. Buscar diseños que coincidan con tipo y destino
-  const match = findMatchingDesigns(userText, detectedType);
-
-  if (!match || match.type === 'no_match') {
+  if (!S.sett.outputBotFolder) {
     loadEl.remove();
-    const folderId = S.sett.outputBotFolder;
-    if (!folderId) {
-      addMsg('⚠️ Configura el ID de la carpeta Output Bot en <strong>⚙️ Configuración</strong> para usar el bot de diseño.', 'bot');
-    } else if (!match?.available?.length) {
-      addMsg(`⚠️ No hay archivos de tipo <strong>${typeLabel}</strong> en la carpeta de diseños. Verifica que el bot de diseño haya generado archivos con ese formato.`, 'bot');
-    } else {
-      const destReq = match.destRequested || '(no detectado)';
-      const availList = match.available.map(d => `<strong>${d}</strong>`).join(', ');
-      addMsg(
-        `⚠️ No encontré diseños de <strong>${typeLabel}</strong> para el destino "<strong>${destReq}</strong>".<br>` +
-        `Destinos disponibles: ${availList}.<br>` +
-        `Prueba mencionando uno de esos destinos, o cambia a <strong>✏️ Sin diseño</strong>.`,
-        'bot'
-      );
-    }
+    addMsg('⚠️ Configura el ID de la carpeta Output Bot en <strong>⚙️ Configuración</strong> para usar el bot de diseño.', 'bot');
     return;
   }
 
-  // 3. Construir contexto de archivos seleccionados para Claude
-  const filesContext = match.files.map((f, i) =>
-    `Slide ${i+1}: ${f.name} (destino: ${f.destination}, fecha: ${f.timestamp})`
-  ).join('\n');
-
-  const destDisplay = match.files[0].destination;
-  const slideCount  = match.files.length;
-
-  // 4. Pedir a Claude que genere caption y hashtags en base a los archivos seleccionados
-  const prompt = `Tipo de contenido: ${typeLabel}
-Solicitud del usuario: ${userText}
-
-El bot de diseño ya seleccionó los siguientes archivos de diseño (NO describas las imágenes, úsalos como contexto para generar el copy):
-${filesContext}
-Destino/lugar: ${destDisplay}
-${slideCount > 1 ? `Número de slides del carrusel: ${slideCount}` : ''}
-
-Genera el JSON del post con caption y hashtags relevantes para este destino específico. El caption debe ser auténtico y conectar con el lugar/experiencia.`;
-
-  const res   = await callClaude([{ role:'user', content: prompt }]);
-  const text2 = res.content[0].text;
+  // 2. Claude genera el contenido normalmente (igual que modo sin diseño)
+  const typeLabel = { post:'post', reel:'reel', story:'historia', carousel:'carrusel' }[S.type];
+  const prompt = `Tipo de contenido solicitado: ${typeLabel}\n\nSolicitud del usuario: ${userText}`;
+  const res    = await callClaude([{ role:'user', content: prompt }]);
+  const text2  = res.content[0].text;
 
   let data = null;
   const m = text2.match(/\{[\s\S]*\}/);
   if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
 
   loadEl.remove();
-
   if (!data) { addMsg(text2, 'bot'); return; }
 
-  // 5. Crear el post y asignar los archivos del Output Bot
-  const postData = {
-    ...data,
-    type:      data.type || S.type,
-    status:    'pending',
-    createdAt: new Date().toISOString(),
-  };
+  // 3. Asignar diseños a cada post (single o batch)
+  const usedIds = new Set(); // evitar repetir el mismo archivo en lote
+  const posts   = data.batch && Array.isArray(data.posts) ? data.posts : [data];
 
-  if (match.type === 'carrusel' || match.type === 'carousel') {
-    postData.type          = 'carousel';
-    postData.imageIds       = match.files.map(f => f.id);
-    postData.imageThumbnails = match.files.map(f => f.thumbnailLink);
-    postData.imageNames     = match.files.map(f => f.name);
-    postData.imageId        = postData.imageIds[0];
-    postData.imageThumbnail = postData.imageThumbnails[0];
-    postData.imageName      = postData.imageNames[0];
-    // Asegurarse que slides[] tenga la cantidad correcta
-    if (!postData.slides || postData.slides.length !== match.files.length) {
-      postData.slides = match.files.map((_, i) => ({ caption: `Slide ${i+1}`, imageDescription: '' }));
+  const saved = posts.map(p => {
+    const postType = p.type || S.type;
+    // Buscar diseño usando caption/imageDescription como contexto de destino
+    const context = (p.imageDescription || p.caption || '') + ' ' + userText;
+    const match   = findMatchingDesigns(context, postType, usedIds);
+
+    const postData = {
+      ...p,
+      type:      postType,
+      status:    'pending',
+      createdAt: new Date().toISOString(),
+      imageFromDesignBot: true,
+      imageSuggested:     true,
+    };
+
+    if (match) {
+      if (match.type === 'carousel' || postType === 'carousel') {
+        postData.type            = 'carousel';
+        postData.imageIds        = match.files.map(f => f.id);
+        postData.imageThumbnails = match.files.map(f => f.thumbnailLink);
+        postData.imageNames      = match.files.map(f => f.name);
+        postData.imageId         = postData.imageIds[0];
+        postData.imageThumbnail  = postData.imageThumbnails[0];
+        postData.imageName       = postData.imageNames[0];
+        if (!postData.slides || postData.slides.length !== match.files.length) {
+          postData.slides = match.files.map((_, i) => ({ caption:`Slide ${i+1}`, imageDescription:'' }));
+        }
+      } else {
+        postData.imageId        = match.files[0].id;
+        postData.imageThumbnail = match.files[0].thumbnailLink;
+        postData.imageName      = match.files[0].name;
+      }
+      postData._designDest    = match.files[0].destination;
+      postData._designFallback = match.isFallback;
     }
-  } else {
-    postData.imageId        = match.files[0].id;
-    postData.imageThumbnail = match.files[0].thumbnailLink;
-    postData.imageName      = match.files[0].name;
-  }
-  postData.imageSuggested = true;
-  postData.imageFromDesignBot = true;
 
-  const post = savePost(postData);
+    return savePost(postData);
+  });
+
   persistPosts();
 
-  const imgLabel = match.type === 'carrusel'
-    ? `${match.files.length} slides del bot de diseño`
-    : `imagen del bot de diseño`;
-  addMsg(`🤖 Publicación creada con <strong>${imgLabel}</strong> (${destDisplay}). Revísala en <strong>Pendientes</strong>.`, 'bot');
-  renderPostCard(post);
+  if (posts.length > 1) {
+    // Lote
+    const withDesign = saved.filter(p => p.imageThumbnail).length;
+    addMsg(`🤖 <strong>${saved.length} publicaciones</strong> creadas — ${withDesign} con diseño del bot. Ve a <strong>Pendientes</strong> para revisarlas.`, 'bot');
+    toast(`${saved.length} publicaciones creadas con bot de diseño`, 'success');
+  } else {
+    // Post único
+    const post = saved[0];
+    const dest = post._designDest ? ` (${post._designDest})` : '';
+    const fallbackNote = post._designFallback ? ' — destino aproximado' : '';
+    addMsg(`🤖 Publicación creada con diseño del bot${dest}${fallbackNote}. Revísala en <strong>Pendientes</strong>.`, 'bot');
+    renderPostCard(post);
+  }
+  updateBadge();
 }
 
 function addMsg(html, role, raw = false) {
