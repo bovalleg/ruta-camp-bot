@@ -250,6 +250,19 @@
     .appr-hint    { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
     .appr-actions { display: flex; gap: 5px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--border); }
 
+    /* ─── DESIGN BOT TOGGLE ─── */
+    .design-bot-bar {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 8px 16px 10px; border-top: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+    }
+    .dbot-btn {
+      font-size: 12px; padding: 5px 13px; border-radius: 20px; border: 1.5px solid var(--border);
+      background: transparent; color: var(--muted); cursor: pointer; transition: all .15s;
+    }
+    .dbot-btn:hover { border-color: var(--green-500); color: var(--fg); }
+    .dbot-btn.active { background: var(--green-800); border-color: var(--green-500); color: var(--green-300); font-weight: 600; }
+
     /* ─── CAROUSEL VIEWER ─── */
     .carousel-viewer { user-select: none; }
     .cv-arrow {
@@ -512,6 +525,12 @@
         <div class="type-chip"    data-t="story"    onclick="pickType(this)">📱 Historia</div>
         <div class="type-chip"    data-t="carousel" onclick="pickType(this)">🔄 Carrusel</div>
       </div>
+      <div class="design-bot-bar" id="designBotBar">
+        <div style="font-size:11px;color:var(--muted);">Modo de creación:</div>
+        <button id="btnNoDiseño"  class="dbot-btn active" onclick="setDesignBot(false)">✏️ Sin diseño</button>
+        <button id="btnConDiseño" class="dbot-btn"        onclick="setDesignBot(true)">🤖 Con bot diseño</button>
+        <div id="dbotStatus" style="font-size:10px;color:var(--muted);margin-left:auto;"></div>
+      </div>
 
       <div class="chat-input-wrap">
         <div class="input-row">
@@ -636,9 +655,14 @@
           <input type="text" class="fi" id="sGoogleClient" placeholder="xxx.apps.googleusercontent.com" oninput="saveSett()">
         </div>
         <div class="form-group">
-          <label class="fl">ID de Carpeta (opcional)</label>
+          <label class="fl">ID de Carpeta Drive (Biblioteca)</label>
           <input type="text" class="fi" id="sDriveFolder" placeholder="ID de la carpeta en Drive" oninput="saveSett()">
           <div class="fi-hint">Copia el ID desde la URL de tu carpeta en Drive</div>
+        </div>
+        <div class="form-group">
+          <label class="fl">🤖 ID Carpeta Bot de Diseño (Output)</label>
+          <input type="text" class="fi" id="sOutputBotFolder" placeholder="ID de la carpeta Ruta Camp Output Bot" oninput="saveSett()">
+          <div class="fi-hint">Carpeta donde el bot de diseño sube los archivos (ej: rutacamp_fuy_post_…)</div>
         </div>
       </div>
 
@@ -724,17 +748,19 @@ Solo se puede vivir. 🌿
    STATE
 ══════════════════════════════════════════════ */
 const S = {
-  view:         'dashboard',
-  type:         'post',
-  posts:        [],
-  media:        [],
-  folders:      [],
-  activeFolder: null,
-  libType:      'all',
-  calDate:      new Date(),
-  busy:         false,
-  sett:         {},
+  view:           'dashboard',
+  type:           'post',
+  posts:          [],
+  media:          [],
+  folders:        [],
+  activeFolder:   null,
+  libType:        'all',
+  calDate:        new Date(),
+  busy:           false,
+  sett:           {},
   brandKnowledge: null,
+  useDesignBot:   false,       // modo: con o sin bot de diseño
+  outputBotFiles: [],          // caché de archivos de la carpeta Output Bot
 };
 
 /* ══════════════════════════════════════════════
@@ -755,6 +781,7 @@ function loadSett() {
     sClaudeKey: 'claudeKey', sClaudeModel: 'claudeModel',
     sBufferProfile: 'bufferProfile', sGithubToken: 'githubToken',
     sGoogleKey: 'googleKey', sGoogleClient: 'googleClient', sDriveFolder: 'driveFolder',
+    sOutputBotFolder: 'outputBotFolder',
     sBrandName: 'brandName', sBrandTone: 'brandTone', sBrandTags: 'brandTags', sLang: 'lang', sRefPosts: 'refPosts',
   };
   Object.entries(map).forEach(([elId, key]) => {
@@ -784,8 +811,9 @@ function saveSett() {
     bufferProfile: document.getElementById('sBufferProfile').value,
     githubToken:   document.getElementById('sGithubToken').value,
     googleKey:     document.getElementById('sGoogleKey').value,
-    googleClient:  document.getElementById('sGoogleClient').value,
-    driveFolder:   document.getElementById('sDriveFolder').value,
+    googleClient:     document.getElementById('sGoogleClient').value,
+    driveFolder:      document.getElementById('sDriveFolder').value,
+    outputBotFolder:  document.getElementById('sOutputBotFolder').value,
     brandName:     document.getElementById('sBrandName').value || 'Ruta Camp',
     brandTone:     document.getElementById('sBrandTone').value,
     brandTags:     document.getElementById('sBrandTags').value,
@@ -926,6 +954,142 @@ async function callClaude(messages) {
 }
 
 /* ══════════════════════════════════════════════
+   DESIGN BOT MODE
+══════════════════════════════════════════════ */
+
+// Mapeo destino → keywords que el usuario puede mencionar
+const DEST_KEYWORDS = {
+  fuy:            ['fuy', 'puerto fuy', 'huilo', 'huilohilo', 'huilo-huilo'],
+  puelo:          ['puelo', 'tagua tagua', 'lago puelo', 'base puelo'],
+  llaima:         ['llaima', 'melipeuco', 'conguillio', 'conguillío', 'domo', 'conguillío'],
+  malalcahuello:  ['malalcahuello', 'warara'],
+  dron:           ['dron', 'aéreo', 'aérea', 'drone', 'aerial'],
+  red:            ['red', 'general', 'todos', 'ruta camp', 'completa'],
+};
+
+// Parse un archivo del Output Bot según la convención de nombres
+// rutacamp_{destino}_{tipo}_{timestamp}_{orden}.ext
+function parseOutputBotFile(file) {
+  const m = file.name.match(
+    /^rutacamp_([^_]+)_(post|story|carrusel|carousel|reel)_([\dT\-:]+?)(?:_(\d+))?\.(\w+)$/i
+  );
+  if (!m) return null;
+  return {
+    id:            file.id,
+    name:          file.name,
+    destination:   m[1].toLowerCase(),
+    type:          m[2].toLowerCase().replace('carousel','carrusel'),
+    timestamp:     m[3],
+    order:         m[4] ? parseInt(m[4], 10) : 1,
+    thumbnailLink: file.thumbnailLink || '',
+    mimeType:      file.mimeType || '',
+  };
+}
+
+// Cargar archivos del Output Bot folder desde Drive
+async function loadOutputBotFiles() {
+  const folderId = S.sett.outputBotFolder;
+  if (!folderId) return [];
+  if (!_gapiInited) return [];
+  try {
+    const r = await gapi.client.drive.files.list({
+      q: `'${folderId}' in parents and trashed=false`,
+      fields: 'files(id,name,mimeType,thumbnailLink,modifiedTime)',
+      pageSize: 300,
+      orderBy:  'modifiedTime desc',
+    });
+    S.outputBotFiles = r.result.files || [];
+    return S.outputBotFiles;
+  } catch(e) {
+    console.error('OutputBot folder error:', e);
+    return [];
+  }
+}
+
+// Detectar destino en el mensaje del usuario (devuelve clave o null)
+function detectDestination(msg) {
+  const lower = msg.toLowerCase();
+  for (const [key, keywords] of Object.entries(DEST_KEYWORDS)) {
+    if (keywords.some(kw => lower.includes(kw))) return key;
+  }
+  return null;
+}
+
+// Encontrar diseños que coincidan con tipo y destino
+// Para carruseles devuelve el grupo de slides con mejor match
+function findMatchingDesigns(userMsg, type) {
+  const parsed = S.outputBotFiles
+    .map(parseOutputBotFile)
+    .filter(Boolean);
+
+  // Normalizar tipo solicitado
+  const reqType = type === 'carousel' ? 'carrusel'
+    : type === 'story'   ? 'story'
+    : type === 'reel'    ? 'reel'
+    : 'post';
+
+  // Filtrar por tipo
+  const byType = parsed.filter(f => f.type === reqType);
+  if (!byType.length) return null;
+
+  const destMatch = detectDestination(userMsg);
+
+  // Puntuar archivos: destino exacto → 10 pts; 'red' como fallback → 2 pts
+  const scored = byType.map(f => ({
+    ...f,
+    score: (destMatch && f.destination === destMatch) ? 10
+         : (f.destination === 'red') ? 2 : 0,
+  }));
+
+  if (reqType === 'carrusel') {
+    // Agrupar por timestamp (= mismo carrusel)
+    const groups = {};
+    scored.forEach(f => {
+      const k = f.destination + '_' + f.timestamp;
+      if (!groups[k]) groups[k] = { score: f.score, files: [] };
+      groups[k].files.push(f);
+    });
+    // Elegir grupo con mayor score; empate → más reciente (timestamp)
+    const best = Object.values(groups)
+      .sort((a, b) => b.score - a.score || b.files[0].timestamp.localeCompare(a.files[0].timestamp))[0];
+    if (!best) return null;
+    best.files.sort((a, b) => a.order - b.order);
+    return { type: 'carousel', files: best.files };
+  } else {
+    // Post/story/reel: elegir el archivo con mayor score
+    const best = scored.sort((a, b) => b.score - a.score || b.timestamp.localeCompare(a.timestamp))[0];
+    return best ? { type: reqType, files: [best] } : null;
+  }
+}
+
+function setDesignBot(enabled) {
+  S.useDesignBot = enabled;
+  document.getElementById('btnNoDiseño').classList.toggle('active', !enabled);
+  document.getElementById('btnConDiseño').classList.toggle('active', enabled);
+  const status = document.getElementById('dbotStatus');
+  if (enabled) {
+    const folderId = S.sett.outputBotFolder;
+    if (!folderId) {
+      status.textContent = '⚠️ Configura el ID de carpeta Output Bot en ⚙️';
+      status.style.color = 'var(--warning)';
+    } else if (!_gapiInited) {
+      status.textContent = '⚠️ Conecta Google Drive en Biblioteca primero';
+      status.style.color = 'var(--warning)';
+    } else {
+      status.textContent = '⏳ Cargando diseños…';
+      status.style.color = 'var(--muted)';
+      loadOutputBotFiles().then(files => {
+        const parsed = files.map(parseOutputBotFile).filter(Boolean);
+        status.textContent = `✅ ${parsed.length} diseños disponibles`;
+        status.style.color = 'var(--green-400)';
+      });
+    }
+  } else {
+    status.textContent = '';
+  }
+}
+
+/* ══════════════════════════════════════════════
    CHAT
 ══════════════════════════════════════════════ */
 function pickType(el) {
@@ -949,39 +1113,43 @@ async function send() {
   document.getElementById('sendBtn').disabled = true;
 
   const typeLabel = { post:'post', reel:'reel', story:'historia', carousel:'carrusel' }[S.type];
-  const prompt = `Tipo de contenido solicitado: ${typeLabel}\n\nSolicitud del usuario: ${text}`;
-
   const loadEl = addMsg('<div class="loading-row"><div class="spin"></div> Generando con IA...</div>', 'bot', true);
 
   try {
-    const res  = await callClaude([{ role:'user', content: prompt }]);
-    const text2 = res.content[0].text;
-
-    // Extract JSON from response
-    let data = null;
-    const m = text2.match(/\{[\s\S]*\}/);
-    if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
-
-    loadEl.remove();
-
-    if (data?.batch && Array.isArray(data.posts)) {
-      const saved = data.posts.map(p => {
-        const post = savePost({ ...p, status:'pending', createdAt: new Date().toISOString() });
-        suggestImageForPost(post);
-        return post;
-      });
-      persistPosts();
-      const withImg = saved.filter(p => p.imageThumbnail).length;
-      addMsg(`✅ Generé <strong>${saved.length} publicaciones</strong>${withImg ? ` — se sugirió imagen a ${withImg}` : ''}. Ve a <strong>Pendientes</strong> para revisarlas.`, 'bot');
-      toast(`${saved.length} publicaciones creadas`, 'success');
-    } else if (data) {
-      const post = savePost({ ...data, type: data.type || S.type, status:'pending', createdAt: new Date().toISOString() });
-      suggestImageForPost(post);
-      persistPosts();
-      addMsg(`✅ Publicación creada${post.imageSuggested ? ' con imagen sugerida de tu Drive' : ''}. Revísala en <strong>Pendientes</strong>.`, 'bot');
-      renderPostCard(post);
+    // ── MODO CON BOT DE DISEÑO ──
+    if (S.useDesignBot) {
+      await sendWithDesignBot(text, typeLabel, loadEl);
     } else {
-      addMsg(text2, 'bot');
+      // ── MODO SIN DISEÑO (comportamiento original) ──
+      const prompt = `Tipo de contenido solicitado: ${typeLabel}\n\nSolicitud del usuario: ${text}`;
+      const res   = await callClaude([{ role:'user', content: prompt }]);
+      const text2 = res.content[0].text;
+
+      let data = null;
+      const m = text2.match(/\{[\s\S]*\}/);
+      if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
+
+      loadEl.remove();
+
+      if (data?.batch && Array.isArray(data.posts)) {
+        const saved = data.posts.map(p => {
+          const post = savePost({ ...p, status:'pending', createdAt: new Date().toISOString() });
+          suggestImageForPost(post);
+          return post;
+        });
+        persistPosts();
+        const withImg = saved.filter(p => p.imageThumbnail).length;
+        addMsg(`✅ Generé <strong>${saved.length} publicaciones</strong>${withImg ? ` — se sugirió imagen a ${withImg}` : ''}. Ve a <strong>Pendientes</strong> para revisarlas.`, 'bot');
+        toast(`${saved.length} publicaciones creadas`, 'success');
+      } else if (data) {
+        const post = savePost({ ...data, type: data.type || S.type, status:'pending', createdAt: new Date().toISOString() });
+        suggestImageForPost(post);
+        persistPosts();
+        addMsg(`✅ Publicación creada${post.imageSuggested ? ' con imagen sugerida de tu Drive' : ''}. Revísala en <strong>Pendientes</strong>.`, 'bot');
+        renderPostCard(post);
+      } else {
+        addMsg(text2, 'bot');
+      }
     }
     updateBadge();
   } catch (err) {
@@ -991,6 +1159,92 @@ async function send() {
 
   S.busy = false;
   document.getElementById('sendBtn').disabled = false;
+}
+
+async function sendWithDesignBot(userText, typeLabel, loadEl) {
+  // 1. Recargar archivos del Output Bot si está vacío
+  if (!S.outputBotFiles.length) await loadOutputBotFiles();
+
+  // 2. Buscar diseños que coincidan con tipo y destino
+  const match = findMatchingDesigns(userText, S.type);
+
+  if (!match) {
+    loadEl.remove();
+    const folderId = S.sett.outputBotFolder;
+    if (!folderId) {
+      addMsg('⚠️ Configura el ID de la carpeta Output Bot en <strong>⚙️ Configuración</strong> para usar el bot de diseño.', 'bot');
+    } else {
+      addMsg(`⚠️ No encontré diseños de tipo <strong>${typeLabel}</strong> para esa solicitud en la carpeta de diseños. Puedes cambiar a "✏️ Sin diseño" o verificar que existan archivos del tipo correcto.`, 'bot');
+    }
+    return;
+  }
+
+  // 3. Construir contexto de archivos seleccionados para Claude
+  const filesContext = match.files.map((f, i) =>
+    `Slide ${i+1}: ${f.name} (destino: ${f.destination}, fecha: ${f.timestamp})`
+  ).join('\n');
+
+  const destDisplay = match.files[0].destination;
+  const slideCount  = match.files.length;
+
+  // 4. Pedir a Claude que genere caption y hashtags en base a los archivos seleccionados
+  const prompt = `Tipo de contenido: ${typeLabel}
+Solicitud del usuario: ${userText}
+
+El bot de diseño ya seleccionó los siguientes archivos de diseño (NO describas las imágenes, úsalos como contexto para generar el copy):
+${filesContext}
+Destino/lugar: ${destDisplay}
+${slideCount > 1 ? `Número de slides del carrusel: ${slideCount}` : ''}
+
+Genera el JSON del post con caption y hashtags relevantes para este destino específico. El caption debe ser auténtico y conectar con el lugar/experiencia.`;
+
+  const res   = await callClaude([{ role:'user', content: prompt }]);
+  const text2 = res.content[0].text;
+
+  let data = null;
+  const m = text2.match(/\{[\s\S]*\}/);
+  if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
+
+  loadEl.remove();
+
+  if (!data) { addMsg(text2, 'bot'); return; }
+
+  // 5. Crear el post y asignar los archivos del Output Bot
+  const postData = {
+    ...data,
+    type:      data.type || S.type,
+    status:    'pending',
+    createdAt: new Date().toISOString(),
+  };
+
+  if (match.type === 'carrusel' || match.type === 'carousel') {
+    postData.type          = 'carousel';
+    postData.imageIds       = match.files.map(f => f.id);
+    postData.imageThumbnails = match.files.map(f => f.thumbnailLink);
+    postData.imageNames     = match.files.map(f => f.name);
+    postData.imageId        = postData.imageIds[0];
+    postData.imageThumbnail = postData.imageThumbnails[0];
+    postData.imageName      = postData.imageNames[0];
+    // Asegurarse que slides[] tenga la cantidad correcta
+    if (!postData.slides || postData.slides.length !== match.files.length) {
+      postData.slides = match.files.map((_, i) => ({ caption: `Slide ${i+1}`, imageDescription: '' }));
+    }
+  } else {
+    postData.imageId        = match.files[0].id;
+    postData.imageThumbnail = match.files[0].thumbnailLink;
+    postData.imageName      = match.files[0].name;
+  }
+  postData.imageSuggested = true;
+  postData.imageFromDesignBot = true;
+
+  const post = savePost(postData);
+  persistPosts();
+
+  const imgLabel = match.type === 'carrusel'
+    ? `${match.files.length} slides del bot de diseño`
+    : `imagen del bot de diseño`;
+  addMsg(`🤖 Publicación creada con <strong>${imgLabel}</strong> (${destDisplay}). Revísala en <strong>Pendientes</strong>.`, 'bot');
+  renderPostCard(post);
 }
 
 function addMsg(html, role, raw = false) {
