@@ -1727,28 +1727,45 @@ async function setFolder(folderId, btn) {
   } catch(e) { toast('Error cargando carpeta: '+(e.result?.error?.message||e.message), 'error'); }
 }
 
-/* ── Auto-sugerir imagen desde Drive ── */
+/* ── Auto-sugerir imagen(es) desde Drive ── */
 function suggestImageForPost(post) {
-  if (!S.media.length || post.imageThumbnail) return; // ya tiene imagen
-  const desc = (post.imageDescription || post.caption || '').toLowerCase();
+  if (!S.media.length) return;
+
+  const desc  = (post.imageDescription || post.caption || '').toLowerCase();
   const words = desc.split(/[\s,.:;!?]+/).filter(w => w.length > 4);
 
-  let best = null, bestScore = -1;
-  for (const f of S.media) {
-    if (!f.thumbnailLink) continue;
-    const name = f.name.toLowerCase().replace(/[-_]/g,' ');
-    let score = words.reduce((s, w) => s + (name.includes(w) ? 2 : 0), 0);
-    // bonus por tipo de contenido
-    if (post.type === 'reel' && f.mimeType?.startsWith('video')) score += 3;
-    if (post.type !== 'reel' && f.mimeType?.startsWith('image')) score += 1;
-    if (score > bestScore) { bestScore = score; best = f; }
-  }
-  // Si no hubo match por keywords, toma una imagen aleatoria con thumbnail
-  if (!best) {
-    const withThumbs = S.media.filter(f => f.thumbnailLink);
-    if (withThumbs.length) best = withThumbs[Math.floor(Math.random() * withThumbs.length)];
-  }
-  if (best) {
+  // Puntuar todos los archivos con thumbnail
+  const candidates = S.media
+    .filter(f => f.thumbnailLink)
+    .map(f => {
+      const name = f.name.toLowerCase().replace(/[-_]/g, ' ');
+      let score = words.reduce((s, w) => s + (name.includes(w) ? 2 : 0), 0);
+      if (post.type === 'reel' && f.mimeType?.startsWith('video')) score += 3;
+      if (post.type !== 'reel' && f.mimeType?.startsWith('image')) score += 1;
+      return { f, score };
+    })
+    .sort((a, b) => b.score - a.score || Math.random() - 0.5);
+
+  if (!candidates.length) return;
+
+  if (post.type === 'carousel') {
+    // Para carruseles: ya tiene imágenes asignadas → no sobreescribir
+    if (post.imageIds?.some(Boolean)) return;
+    const numSlides = Math.max(post.slides?.length || 3, 3);
+    // Seleccionar top N distintas (sin repetir)
+    const picked = candidates.slice(0, numSlides);
+    post.imageIds       = picked.map(x => x.f.id);
+    post.imageThumbnails = picked.map(x => x.f.thumbnailLink);
+    post.imageNames     = picked.map(x => x.f.name);
+    // Primera imagen como principal (backward compat)
+    post.imageId        = post.imageIds[0];
+    post.imageThumbnail = post.imageThumbnails[0];
+    post.imageName      = post.imageNames[0];
+    post.imageSuggested = true;
+  } else {
+    // Post/reel/story: una sola imagen
+    if (post.imageThumbnail) return; // ya tiene imagen
+    const best = candidates[0].f;
     post.imageId        = best.id;
     post.imageThumbnail = best.thumbnailLink;
     post.imageName      = best.name;
