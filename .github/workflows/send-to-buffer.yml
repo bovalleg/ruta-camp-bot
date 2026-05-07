@@ -18,12 +18,12 @@ on:
         description: "Tipo: post | reel | story"
         required: false
         default: "post"
-      image_id:
-        description: "ID del archivo en Google Drive (opcional)"
+      image_ids:
+        description: "IDs de Google Drive separados por coma (1 para post/reel/story, varios para carrusel)"
         required: false
         default: ""
-      image_name:
-        description: "Nombre del archivo de imagen (opcional)"
+      image_names:
+        description: "Nombres de archivo separados por coma (mismo orden que image_ids)"
         required: false
         default: ""
 
@@ -52,57 +52,64 @@ jobs:
           hashtags   = """${{ inputs.hashtags }}"""
           sched      = "${{ inputs.scheduled_at }}".strip()
           post_type  = "${{ inputs.post_type }}".strip() or "post"
-          image_id   = "${{ inputs.image_id }}".strip()
-          image_name = "${{ inputs.image_name }}".strip()
+          image_ids_raw  = "${{ inputs.image_ids }}".strip()
+          image_names_raw = "${{ inputs.image_names }}".strip()
           MCP_URL    = "https://mcp.buffer.com/mcp"
           GH_REPO    = os.environ.get("GITHUB_REPOSITORY", "bovalleg/ruta-camp-bot")
+
+          # Soporte para imagen unica (retrocompat) y multiples (carrusel)
+          image_ids  = [x.strip() for x in image_ids_raw.split(",") if x.strip()]
+          image_names_list = [x.strip() for x in image_names_raw.split(",") if x.strip()]
 
           text = caption.strip()
           if hashtags.strip():
               text += "\n\n" + hashtags.strip()
 
           print("Canal: " + (channel or "(auto)"))
-          print("Imagen Drive ID: " + (image_id or "(ninguna)"))
+          print("Imagenes Drive: " + str(len(image_ids)) + " (" + ", ".join(image_ids) + ")")
           print("Tipo: " + post_type)
 
-          # ── Descargar imagen de Google Drive ──
-          public_image_url = ""
-          if image_id and google_key:
-              print("\n📥 Descargando imagen de Google Drive...")
-              try:
-                  meta_url = "https://www.googleapis.com/drive/v3/files/" + image_id + "?fields=name,mimeType&key=" + google_key
-                  with urllib.request.urlopen(urllib.request.Request(meta_url), timeout=15) as r:
-                      meta = json.loads(r.read())
-                  fname = meta.get("name", image_name or (image_id + ".jpg"))
-                  print("  Archivo: " + fname)
+          # ── Descargar imágenes de Google Drive ──
+          public_image_urls = []
+          if image_ids and google_key:
+              print("\n📥 Descargando " + str(len(image_ids)) + " imagen(es) de Google Drive...")
+              os.makedirs("media", exist_ok=True)
+              os.system('git config user.name "github-actions[bot]"')
+              os.system('git config user.email "github-actions[bot]@users.noreply.github.com"')
+              for idx, image_id in enumerate(image_ids):
+                  fallback_name = image_names_list[idx] if idx < len(image_names_list) else (image_id + ".jpg")
+                  try:
+                      meta_url = "https://www.googleapis.com/drive/v3/files/" + image_id + "?fields=name,mimeType&key=" + google_key
+                      with urllib.request.urlopen(urllib.request.Request(meta_url), timeout=15) as r:
+                          meta = json.loads(r.read())
+                      fname = meta.get("name", fallback_name)
+                      print("  [" + str(idx+1) + "] Archivo: " + fname)
 
-                  dl_url = "https://www.googleapis.com/drive/v3/files/" + image_id + "?alt=media&key=" + google_key
-                  with urllib.request.urlopen(urllib.request.Request(dl_url), timeout=30) as r2:
-                      img_bytes = r2.read()
-                  print("  Descargado: " + str(len(img_bytes)) + " bytes")
+                      dl_url = "https://www.googleapis.com/drive/v3/files/" + image_id + "?alt=media&key=" + google_key
+                      with urllib.request.urlopen(urllib.request.Request(dl_url), timeout=30) as r2:
+                          img_bytes = r2.read()
+                      print("  [" + str(idx+1) + "] Descargado: " + str(len(img_bytes)) + " bytes")
 
-                  safe_name = re.sub(r'[^a-zA-Z0-9._-]', '_', fname)
-                  media_path = "media/" + safe_name
-                  os.makedirs("media", exist_ok=True)
-                  with open(media_path, "wb") as f:
-                      f.write(img_bytes)
+                      safe_name = re.sub(r'[^a-zA-Z0-9._-]', '_', fname)
+                      media_path = "media/" + safe_name
+                      with open(media_path, "wb") as f:
+                          f.write(img_bytes)
 
-                  # Usar raw.githubusercontent.com — disponible inmediatamente
-                  public_image_url = "https://raw.githubusercontent.com/" + GH_REPO + "/main/" + media_path
-                  print("  URL publica: " + public_image_url)
+                      public_url = "https://raw.githubusercontent.com/" + GH_REPO + "/main/" + media_path
+                      public_image_urls.append(public_url)
+                      print("  [" + str(idx+1) + "] URL publica: " + public_url)
 
-                  os.system('git config user.name "github-actions[bot]"')
-                  os.system('git config user.email "github-actions[bot]@users.noreply.github.com"')
+                  except Exception as e:
+                      print("  [" + str(idx+1) + "] ⚠ No se pudo descargar " + image_id + ": " + str(e))
+
+              if public_image_urls:
                   os.system('git add media/')
-                  os.system('git diff --cached --quiet || git commit -m "📸 Imagen para post de Buffer: ' + safe_name + '"')
+                  os.system('git diff --cached --quiet || git commit -m "📸 Imagenes para Buffer (' + str(len(public_image_urls)) + ')"')
                   os.system('git push')
-                  print("  Imagen subida al repo.")
+                  print("  " + str(len(public_image_urls)) + " imagen(es) subida(s) al repo.")
 
-              except Exception as e:
-                  print("  ⚠ No se pudo descargar imagen: " + str(e))
-                  print("  Verifica que GOOGLE_API_KEY este en Secrets y el archivo sea publico en Drive.")
-          elif image_id and not google_key:
-              print("⚠ Imagen Drive ID recibido pero GOOGLE_API_KEY no esta configurado en Secrets.")
+          elif image_ids and not google_key:
+              print("⚠ image_ids recibido pero GOOGLE_API_KEY no esta configurado en Secrets.")
 
           # ── MCP helpers ──
           def post_mcp(payload, session_id=None):
@@ -173,19 +180,26 @@ jobs:
               import datetime
               sched = datetime.datetime.fromtimestamp(int(sched), tz=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
-          # ── create_post con imagen ──
-          if public_image_url:
-              print("\n📤 Creando post con imagen en Buffer...")
+          # ── create_post con imagen(es) ──
+          result_text = ""
+          if public_image_urls:
+              n_imgs = len(public_image_urls)
+              label = "carrusel de " + str(n_imgs) + " imagenes" if n_imgs > 1 else "con imagen"
+              print("\n📤 Creando post (" + label + ") en Buffer...")
+              # Buffer acepta hasta 10 imágenes en assets.images para carruseles
+              assets_images = [{"url": u, "metadata": {"altText": "Ruta Camp"}} for u in public_image_urls]
+              # post_type: si es carrusel de >1 imagen, forzar 'post' (Instagram carrusel = post feed)
+              ig_type = post_type if post_type in ("post","reel","story") else "post"
+              if n_imgs > 1:
+                  ig_type = "post"
               post_args = {
                   "channelId": channel,
                   "schedulingType": "automatic",
                   "text": text,
-                  "assets": {
-                      "images": [{"url": public_image_url, "metadata": {"altText": "Ruta Camp"}}]
-                  },
+                  "assets": {"images": assets_images},
                   "metadata": {
                       "instagram": {
-                          "type": post_type if post_type in ("post","reel","story") else "post",
+                          "type": ig_type,
                           "shouldShareToFeed": True
                       }
                   }
@@ -202,11 +216,11 @@ jobs:
               print("Respuesta: " + result_text[:400])
 
               if '"isError":true' in body4 or '"error"' in result_text:
-                  print("\n⚠ create_post falló — usando create_idea como fallback...")
-                  public_image_url = ""
+                  print("\n⚠ create_post fallo — usando create_idea como fallback...")
+                  public_image_urls = []
 
           # ── create_idea (fallback o sin imagen) ──
-          if not public_image_url:
+          if not public_image_urls:
               print("\n📝 Creando idea en Buffer...")
               idea_content = {"text": text, "services": ["instagram"]}
               if org_id:
@@ -221,7 +235,13 @@ jobs:
               post_id = rd.get("id") or (rd.get("post") or rd.get("idea") or {}).get("id","?")
           except: post_id = "?"
 
-          mode_label = "con imagen" if public_image_url else "como idea (sin imagen)"
+          n_sent = len(public_image_urls)
+          if n_sent > 1:
+              mode_label = "carrusel de " + str(n_sent) + " imagenes"
+          elif n_sent == 1:
+              mode_label = "con imagen"
+          else:
+              mode_label = "como idea (sin imagen)"
           print("\n✅ Enviado a Buffer " + mode_label + "! ID: " + str(post_id))
 
           sp = os.environ.get("GITHUB_STEP_SUMMARY","")

@@ -1125,13 +1125,20 @@ async function dispatchWorkflow(workflow, inputs = {}) {
 }
 
 async function sendToBuffer(post) {
+  // Carrusel: usar arrays imageIds/imageNames; otros: imageId/imageName simple
+  const imageIds  = (post.type === 'carousel' && post.imageIds?.length)
+    ? post.imageIds.filter(Boolean).join(',')
+    : (post.imageId || '');
+  const imageNames = (post.type === 'carousel' && post.imageNames?.length)
+    ? post.imageNames.filter(Boolean).join(',')
+    : (post.imageName || '');
   const r = await dispatchWorkflow('send-to-buffer.yml', {
     caption:      post.caption   || '',
     hashtags:     post.hashtags  || '',
     scheduled_at: post.scheduledAt ? new Date(post.scheduledAt).toISOString() : '',
     post_type:    post.type      || 'post',
-    image_id:     post.imageId   || '',
-    image_name:   post.imageName || '',
+    image_ids:    imageIds,
+    image_names:  imageNames,
   });
   return r;
 }
@@ -1209,7 +1216,8 @@ function _pickerGrid(files, postId) {
   }).join('');
 }
 
-async function pickImageForPost(postId) {
+async function pickImageForPost(postId, slotIdx = null) {
+  _currentPickSlot = slotIdx;
   if (!S.media.length) {
     openModal('🖼️ Sin imágenes', `
       <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Primero conecta tu Google Drive para ver tus imágenes.</p>
@@ -1225,10 +1233,11 @@ async function pickImageForPost(postId) {
   // 2. If Drive is connected and still empty, fetch from API
   if (!S.folders.length && _gapiInited) await loadDriveFolders();
 
-  _openPickerModal(postId);
+  _openPickerModal(postId, slotIdx);
 }
 
-function _openPickerModal(postId) {
+function _openPickerModal(postId, slotIdx = null) {
+  const slotLabel = slotIdx !== null ? ` — Slide ${slotIdx + 1}` : '';
   const folderTabs = [
     `<button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="refreshPickerGrid('${postId}',null,this)">📁 Todas</button>`,
     ...S.folders.map(f =>
@@ -1242,7 +1251,7 @@ function _openPickerModal(postId) {
     ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="reloadFoldersForPicker('${postId}')">🔄 Cargar carpetas</button>`
     : '';
 
-  openModal('🖼️ Seleccionar Imagen', `
+  openModal(`🖼️ Seleccionar Imagen${slotLabel}`, `
     <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);">
       ${folderTabs}${noFolderNote}
     </div>
@@ -1288,16 +1297,36 @@ async function refreshPickerGrid(postId, folderId, btn) {
 function attachImage(postId, fileId, thumbnailLink, name) {
   const p = S.posts.find(x => x.id === postId);
   if (!p) return;
-  p.imageId        = fileId;
-  p.imageThumbnail = thumbnailLink;
-  p.imageName      = name;
+
+  if (p.type === 'carousel' && _currentPickSlot !== null) {
+    // Carrusel: asignar imagen al slot específico
+    if (!p.imageIds)       p.imageIds       = [];
+    if (!p.imageThumbnails) p.imageThumbnails = [];
+    if (!p.imageNames)     p.imageNames     = [];
+    // Rellenar hasta el índice necesario
+    while (p.imageIds.length       <= _currentPickSlot) p.imageIds.push('');
+    while (p.imageThumbnails.length <= _currentPickSlot) p.imageThumbnails.push('');
+    while (p.imageNames.length     <= _currentPickSlot) p.imageNames.push('');
+    p.imageIds[_currentPickSlot]       = fileId;
+    p.imageThumbnails[_currentPickSlot] = thumbnailLink;
+    p.imageNames[_currentPickSlot]     = name;
+    // Mantener el primero como imagen principal (para backward compat)
+    p.imageId        = p.imageIds[0];
+    p.imageThumbnail = p.imageThumbnails[0];
+    p.imageName      = p.imageNames[0];
+  } else {
+    p.imageId        = fileId;
+    p.imageThumbnail = thumbnailLink;
+    p.imageName      = name;
+  }
+  _currentPickSlot = null;
   persistPosts();
   closeModal();
   renderPend();
   // Si la tarjeta está visible en el chat, actualizar también
   const chatImg = document.getElementById(`card-img-${postId}`);
-  if (chatImg && thumbnailLink) {
-    chatImg.innerHTML = `<img src="${thumbnailLink}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;border-radius:0;">`;
+  if (chatImg && (p.imageThumbnail || thumbnailLink)) {
+    chatImg.innerHTML = `<img src="${p.imageThumbnail || thumbnailLink}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;border-radius:0;">`;
   }
   toast(`✅ "${name}" adjuntada al post`, 'success');
 }
@@ -1432,36 +1461,78 @@ function renderPend() {
     el.innerHTML = `<div class="empty"><div class="empty-icon">✅</div><p>No hay publicaciones pendientes</p><button class="btn btn-primary" onclick="nav('create')">+ Crear Contenido</button></div>`;
     return;
   }
-  el.innerHTML = pend.map(p => `
-    <div class="appr-card">
-      <div class="appr-thumb" onclick="pickImageForPost('${p.id}')" title="Clic para cambiar imagen">
-        ${p.imageThumbnail
-          ? `<img src="${p.imageThumbnail}" alt="">`
-          : `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;opacity:.65;">${typeEmoji(p.type)}<span style="font-size:11px;color:rgba(255,255,255,.6);">+ agregar imagen</span></div>`
-        }
-        <div class="appr-thumb-bar">
-          <span style="font-size:14px;">${typeEmoji(p.type)}</span>
-          <span class="type-badge">${p.type}</span>
-          <span class="appr-date">${fmtDate(p.createdAt)}</span>
-          <span class="appr-status">⏳ Pendiente</span>
-        </div>
-        <div class="appr-change-hint">🖼️ Cambiar imagen</div>
-      </div>
+  el.innerHTML = pend.map(p => {
+    const isCarousel = p.type === 'carousel';
+    const numSlides  = isCarousel ? Math.max(p.slides?.length || 3, p.imageIds?.length || 3) : 1;
+    const filledCount = isCarousel ? (p.imageIds?.filter(Boolean).length || 0) : (p.imageThumbnail ? 1 : 0);
+
+    // Thumbnail area: grid de slots para carrusel, imagen única para el resto
+    const thumbArea = isCarousel
+      ? `<div style="padding:8px;">
+           <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">🔄 Slides (${filledCount}/${numSlides} imágenes)</div>
+           <div style="display:grid;grid-template-columns:repeat(${Math.min(numSlides,5)},1fr);gap:5px;">
+             ${[...Array(numSlides)].map((_, i) => {
+               const thumb = p.imageThumbnails?.[i];
+               return `<div onclick="pickImageForPost('${p.id}',${i})" title="Slide ${i+1} — clic para elegir imagen"
+                 style="aspect-ratio:1;border:1.5px dashed var(--border);border-radius:7px;overflow:hidden;cursor:pointer;position:relative;display:flex;align-items:center;justify-content:center;font-size:16px;background:var(--bg-1);"
+                 onmouseover="this.style.borderColor='var(--green-300)'" onmouseout="this.style.borderColor='var(--border)'">
+                 ${thumb ? `<img src="${thumb}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;">` : `<span style="opacity:.4">+</span>`}
+                 <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);font-size:9px;color:#fff;text-align:center;padding:1px 0;">${i+1}</div>
+               </div>`;
+             }).join('')}
+           </div>
+         </div>`
+      : `<div class="appr-thumb" onclick="pickImageForPost('${p.id}')" title="Clic para cambiar imagen">
+           ${p.imageThumbnail
+             ? `<img src="${p.imageThumbnail}" alt="">`
+             : `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;opacity:.65;">${typeEmoji(p.type)}<span style="font-size:11px;color:rgba(255,255,255,.6);">+ agregar imagen</span></div>`
+           }
+           <div class="appr-thumb-bar">
+             <span style="font-size:14px;">${typeEmoji(p.type)}</span>
+             <span class="type-badge">${p.type}</span>
+             <span class="appr-date">${fmtDate(p.createdAt)}</span>
+             <span class="appr-status">⏳ Pendiente</span>
+           </div>
+           <div class="appr-change-hint">🖼️ Cambiar imagen</div>
+         </div>`;
+
+    const imageLabel = isCarousel
+      ? (filledCount > 0 ? `<div style="font-size:10px;color:var(--green-300);margin-bottom:4px;">✅ ${filledCount}/${numSlides} slides con imagen</div>` : '')
+      : (p.imageName ? `<div style="font-size:10px;color:var(--green-300);margin-bottom:4px;">✅ ${p.imageName}${p.imageSuggested?' (sugerida)':''}</div>` : '');
+
+    const addImgBtn = isCarousel
+      ? `<button class="btn btn-ghost btn-sm" onclick="pickImageForPost('${p.id}',0)">🖼️ Imágenes</button>`
+      : `<button class="btn btn-ghost btn-sm" onclick="pickImageForPost('${p.id}')">🖼️ ${p.imageName?'Cambiar':'+ Imagen'}</button>`;
+
+    return `<div class="appr-card">
+      ${isCarousel
+        ? `<div style="border-bottom:1px solid var(--border);">
+             <div class="appr-thumb-bar" style="position:relative;padding:8px 12px;">
+               <span style="font-size:14px;">${typeEmoji(p.type)}</span>
+               <span class="type-badge">${p.type}</span>
+               <span class="appr-date">${fmtDate(p.createdAt)}</span>
+               <span class="appr-status">⏳ Pendiente</span>
+             </div>
+             ${thumbArea}
+           </div>`
+        : thumbArea
+      }
       <div class="appr-content">
         <div class="appr-caption">${(p.caption||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</div>
         <div class="appr-tags">${p.hashtags||''}</div>
-        ${p.imageName ? `<div style="font-size:10px;color:var(--green-300);margin-bottom:4px;">✅ ${p.imageName}${p.imageSuggested?' (sugerida)':''}</div>` : ''}
+        ${imageLabel}
         ${p.scheduleHint ? `<div class="appr-hint">⏰ ${p.scheduleHint}</div>` : ''}
         <div class="appr-actions">
           <button class="btn btn-success btn-sm" onclick="approvePost('${p.id}')">✅ Aprobar</button>
-          <button class="btn btn-ghost btn-sm"   onclick="pickImageForPost('${p.id}')">🖼️ ${p.imageName?'Cambiar':'+ Imagen'}</button>
+          ${addImgBtn}
           <button class="btn btn-ghost btn-sm"   onclick="schedulePost('${p.id}')">📅 Programar</button>
           <button class="btn btn-ghost btn-sm"   onclick="copyPost('${p.id}')">📋 Copiar</button>
           <button class="btn btn-warning btn-sm" onclick="requestChanges('${p.id}')">✏️ Cambios</button>
           <button class="btn btn-danger btn-sm"  onclick="deletePost('${p.id}')">🗑️</button>
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 /* ══════════════════════════════════════════════
@@ -1687,6 +1758,7 @@ function suggestImageForPost(post) {
 
 /* ── Google Drive (usa Google Identity Services — nuevo estándar 2024) ── */
 let _gapiInited = false;
+let _currentPickSlot = null;   // índice de slide para carrusel (null = imagen única)
 let _tokenClient = null;
 
 function loadScript(src) {
