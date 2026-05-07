@@ -974,6 +974,8 @@ function parseOutputBotFile(file) {
     /^rutacamp_([^_]+)_(post|story|carrusel|carousel|reel)_([\dT\-:]+?)(?:_(\d+))?\.(\w+)$/i
   );
   if (!m) return null;
+  // Thumbnail: usar URL autenticada de Drive (funciona si el usuario está logueado en Google)
+  const thumbUrl = `https://drive.google.com/thumbnail?id=${file.id}&sz=w600`;
   return {
     id:            file.id,
     name:          file.name,
@@ -981,7 +983,7 @@ function parseOutputBotFile(file) {
     type:          m[2].toLowerCase().replace('carousel','carrusel'),
     timestamp:     m[3],
     order:         m[4] ? parseInt(m[4], 10) : 1,
-    thumbnailLink: file.thumbnailLink || '',
+    thumbnailLink: thumbUrl,
     mimeType:      file.mimeType || '',
   };
 }
@@ -1016,7 +1018,7 @@ function detectDestination(msg) {
 }
 
 // Encontrar diseños que coincidan con tipo y destino
-// Para carruseles devuelve el grupo de slides con mejor match
+// Devuelve { type, files } si hay match, { type:'no_match', available, reqType } si no hay coincidencia exacta
 function findMatchingDesigns(userMsg, type) {
   const parsed = S.outputBotFiles
     .map(parseOutputBotFile)
@@ -1030,35 +1032,51 @@ function findMatchingDesigns(userMsg, type) {
 
   // Filtrar por tipo
   const byType = parsed.filter(f => f.type === reqType);
-  if (!byType.length) return null;
+  if (!byType.length) return { type: 'no_match', reqType, available: [] };
 
   const destMatch = detectDestination(userMsg);
 
-  // Puntuar archivos: destino exacto → 10 pts; 'red' como fallback → 2 pts
+  // Puntuar: destino exacto → 10 pts; 'red' como fallback → 2 pts; resto → 0
   const scored = byType.map(f => ({
     ...f,
     score: (destMatch && f.destination === destMatch) ? 10
          : (f.destination === 'red') ? 2 : 0,
   }));
 
+  // Destinos disponibles (para mensaje informativo)
+  const available = [...new Set(byType.map(f => f.destination))];
+
   if (reqType === 'carrusel') {
-    // Agrupar por timestamp (= mismo carrusel)
+    // Agrupar por destino+timestamp (= mismo carrusel)
     const groups = {};
     scored.forEach(f => {
       const k = f.destination + '_' + f.timestamp;
-      if (!groups[k]) groups[k] = { score: f.score, files: [] };
+      if (!groups[k]) groups[k] = { score: f.score, destination: f.destination, files: [] };
+      // El score del grupo es el máximo de sus slides
+      groups[k].score = Math.max(groups[k].score, f.score);
       groups[k].files.push(f);
     });
-    // Elegir grupo con mayor score; empate → más reciente (timestamp)
-    const best = Object.values(groups)
-      .sort((a, b) => b.score - a.score || b.files[0].timestamp.localeCompare(a.files[0].timestamp))[0];
-    if (!best) return null;
+
+    const sortedGroups = Object.values(groups)
+      .sort((a, b) => b.score - a.score || b.files[0].timestamp.localeCompare(a.files[0].timestamp));
+
+    const best = sortedGroups[0];
+
+    // Solo aceptar si hay coincidencia real (score > 0)
+    if (!best || best.score === 0) {
+      return { type: 'no_match', reqType, available, destRequested: destMatch };
+    }
+
     best.files.sort((a, b) => a.order - b.order);
     return { type: 'carousel', files: best.files };
   } else {
-    // Post/story/reel: elegir el archivo con mayor score
-    const best = scored.sort((a, b) => b.score - a.score || b.timestamp.localeCompare(a.timestamp))[0];
-    return best ? { type: reqType, files: [best] } : null;
+    // Post/story/reel: mejor archivo con score > 0
+    const sorted = scored.sort((a, b) => b.score - a.score || b.timestamp.localeCompare(a.timestamp));
+    const best = sorted[0];
+    if (!best || best.score === 0) {
+      return { type: 'no_match', reqType, available, destRequested: destMatch };
+    }
+    return { type: reqType, files: [best] };
   }
 }
 
@@ -1168,13 +1186,22 @@ async function sendWithDesignBot(userText, typeLabel, loadEl) {
   // 2. Buscar diseños que coincidan con tipo y destino
   const match = findMatchingDesigns(userText, S.type);
 
-  if (!match) {
+  if (!match || match.type === 'no_match') {
     loadEl.remove();
     const folderId = S.sett.outputBotFolder;
     if (!folderId) {
       addMsg('⚠️ Configura el ID de la carpeta Output Bot en <strong>⚙️ Configuración</strong> para usar el bot de diseño.', 'bot');
+    } else if (!match?.available?.length) {
+      addMsg(`⚠️ No hay archivos de tipo <strong>${typeLabel}</strong> en la carpeta de diseños. Verifica que el bot de diseño haya generado archivos con ese formato.`, 'bot');
     } else {
-      addMsg(`⚠️ No encontré diseños de tipo <strong>${typeLabel}</strong> para esa solicitud en la carpeta de diseños. Puedes cambiar a "✏️ Sin diseño" o verificar que existan archivos del tipo correcto.`, 'bot');
+      const destReq = match.destRequested || '(no detectado)';
+      const availList = match.available.map(d => `<strong>${d}</strong>`).join(', ');
+      addMsg(
+        `⚠️ No encontré diseños de <strong>${typeLabel}</strong> para el destino "<strong>${destReq}</strong>".<br>` +
+        `Destinos disponibles: ${availList}.<br>` +
+        `Prueba mencionando uno de esos destinos, o cambia a <strong>✏️ Sin diseño</strong>.`,
+        'bot'
+      );
     }
     return;
   }
