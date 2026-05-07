@@ -957,14 +957,16 @@ async function callClaude(messages) {
    DESIGN BOT MODE
 ══════════════════════════════════════════════ */
 
-// Mapeo destino → keywords que el usuario puede mencionar
+// Mapeo semántico: variantes que el usuario puede escribir → clave canónica
+// Las claves DEBEN coincidir con cómo aparece el destino en los nombres de archivo
+// (ej: archivo = rutacamp_puerto-fuy_... → clave = 'puerto-fuy')
 const DEST_KEYWORDS = {
-  fuy:            ['fuy', 'puerto fuy', 'huilo', 'huilohilo', 'huilo-huilo'],
-  puelo:          ['puelo', 'tagua tagua', 'lago puelo', 'base puelo'],
-  llaima:         ['llaima', 'melipeuco', 'conguillio', 'conguillío', 'domo', 'conguillío'],
-  malalcahuello:  ['malalcahuello', 'warara'],
-  dron:           ['dron', 'aéreo', 'aérea', 'drone', 'aerial'],
-  red:            ['red', 'general', 'todos', 'ruta camp', 'completa'],
+  'puerto-fuy':    ['fuy', 'puerto fuy', 'puerto-fuy', 'huilo', 'huilo-huilo', 'huilohilo'],
+  'puelo':         ['puelo', 'tagua tagua', 'lago puelo', 'base puelo', 'tagua'],
+  'conguillio':    ['conguillio', 'conguillío', 'llaima', 'melipeuco', 'domo', 'araucania', 'araucanía'],
+  'malalcahuello': ['malalcahuello', 'warara'],
+  'dron':          ['dron', 'drone', 'aéreo', 'aérea', 'aerial'],
+  'red':           ['red', 'general', 'todos', 'todas', 'ruta camp', 'completa', 'la red'],
 };
 
 // Parse un archivo del Output Bot según la convención de nombres
@@ -1008,12 +1010,41 @@ async function loadOutputBotFiles() {
   }
 }
 
-// Detectar destino en el mensaje del usuario (devuelve clave o null)
+// Normalizar texto: minúsculas, sin tildes
+function norm(s) {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/-/g,' ');
+}
+
+// Detectar destino en el mensaje del usuario → devuelve la clave canónica (que coincide con el filename)
 function detectDestination(msg) {
-  const lower = msg.toLowerCase();
+  const msgNorm = norm(msg);
+
+  // 1. Buscar en el mapa semántico predefinido
   for (const [key, keywords] of Object.entries(DEST_KEYWORDS)) {
-    if (keywords.some(kw => lower.includes(kw))) return key;
+    if (keywords.some(kw => msgNorm.includes(norm(kw)))) return key;
+    // También probar la clave misma normalizada (ej: 'puerto-fuy' → 'puerto fuy')
+    if (msgNorm.includes(norm(key))) return key;
   }
+
+  // 2. Fallback dinámico: comparar contra los destinos reales de los archivos disponibles
+  //    para manejar destinos nuevos que no estén en el mapa
+  const fileDests = [...new Set(
+    S.outputBotFiles.map(parseOutputBotFile).filter(Boolean).map(f => f.destination)
+  )];
+  for (const dest of fileDests) {
+    if (msgNorm.includes(norm(dest))) return dest;
+  }
+
+  return null;
+}
+
+// Detectar tipo de contenido desde el texto del mensaje
+function detectTypeFromMessage(msg) {
+  const m = norm(msg);
+  if (/carru?sel|carousel/.test(m))          return 'carousel';
+  if (/histori|story|stories/.test(m))        return 'story';
+  if (/\breel\b/.test(m))                     return 'reel';
+  if (/\bpost\b|publicaci/.test(m))           return 'post';
   return null;
 }
 
@@ -1179,12 +1210,24 @@ async function send() {
   document.getElementById('sendBtn').disabled = false;
 }
 
-async function sendWithDesignBot(userText, typeLabel, loadEl) {
+async function sendWithDesignBot(userText, typeLabelIn, loadEl) {
+  let typeLabel = typeLabelIn;
   // 1. Recargar archivos del Output Bot si está vacío
   if (!S.outputBotFiles.length) await loadOutputBotFiles();
 
-  // 2. Buscar diseños que coincidan con tipo y destino
-  const match = findMatchingDesigns(userText, S.type);
+  // 2. Detectar tipo desde el mensaje (tiene prioridad sobre el chip seleccionado)
+  const detectedType = detectTypeFromMessage(userText) || S.type;
+  if (detectedType !== S.type) {
+    // Sincronizar el chip de tipo con lo que se detectó
+    document.querySelectorAll('.type-chip').forEach(c => {
+      c.classList.toggle('on', c.dataset.t === detectedType);
+    });
+    S.type = detectedType;
+    typeLabel = { post:'post', reel:'reel', story:'historia', carousel:'carrusel' }[detectedType] || detectedType;
+  }
+
+  // 3. Buscar diseños que coincidan con tipo y destino
+  const match = findMatchingDesigns(userText, detectedType);
 
   if (!match || match.type === 'no_match') {
     loadEl.remove();
