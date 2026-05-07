@@ -232,27 +232,18 @@
       break-inside: avoid; margin-bottom: 16px; display: block;
     }
     .appr-card:hover { border-color: var(--green-700); box-shadow: 0 4px 20px rgba(0,0,0,.25); }
-    .appr-thumb {
-      width: 100%; height: 200px;
-      background: linear-gradient(135deg, var(--green-900) 0%, #1a3a2a 100%);
-      display: flex; align-items: center; justify-content: center; font-size: 48px;
-      position: relative; overflow: hidden; cursor: pointer;
-    }
-    .appr-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
     .appr-thumb-bar {
-      position: absolute; bottom: 0; left: 0; right: 0;
-      background: linear-gradient(transparent, rgba(0,0,0,.75));
-      padding: 24px 10px 8px;
-      display: flex; align-items: center; gap: 6px;
+      display: flex; align-items: center; gap: 6px; padding: 8px 12px;
     }
     .appr-thumb-bar .appr-status { margin-left: auto; font-size: 10px; color: var(--orange); }
     .appr-thumb-bar .appr-date   { font-size: 10px; color: rgba(255,255,255,.65); }
-    .appr-thumb:hover .appr-change-hint { display: flex; }
     .appr-change-hint {
-      display: none; position: absolute; inset: 0;
-      background: rgba(0,0,0,.5); align-items: center; justify-content: center;
-      font-size: 13px; color: #fff;
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,.45); align-items: center; justify-content: center;
+      font-size: 13px; color: #fff; opacity: 0; transition: opacity .2s; z-index: 2; display: flex;
     }
+    div[onclick]:hover > .appr-change-hint,
+    div[onclick]:hover .cv-change-hint { opacity: 1; }
     .appr-content { padding: 12px 14px; }
     .appr-caption { font-size: 13px; line-height: 1.6; margin-bottom: 8px; }
     .appr-tags    { font-size: 11px; color: #5BA3D9; margin-bottom: 8px; }
@@ -1549,20 +1540,27 @@ function renderPend() {
         </div>`;
     })() : '';
 
-    // ── Post/reel/story: thumbnail normal ──
+    // ── Post/reel/story: vista grande estilo Instagram ──
+    const singleAspect = (p.type === 'story' || p.type === 'reel') ? '4/5' : '1/1';
     const singleThumb = !isCarousel ? `
-      <div class="appr-thumb" onclick="pickImageForPost('${p.id}')" title="Clic para cambiar imagen">
-        ${p.imageThumbnail
-          ? `<img src="${p.imageThumbnail}" alt="">`
-          : `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;opacity:.65;">${typeEmoji(p.type)}<span style="font-size:11px;color:rgba(255,255,255,.6);">+ agregar imagen</span></div>`
-        }
-        <div class="appr-thumb-bar">
-          <span style="font-size:14px;">${typeEmoji(p.type)}</span>
-          <span class="type-badge">${p.type}</span>
-          <span class="appr-date">${fmtDate(p.createdAt)}</span>
-          <span class="appr-status">⏳ Pendiente</span>
+      <div style="border-bottom:1px solid var(--border);">
+        <div style="position:relative;aspect-ratio:${singleAspect};background:#0d0d0d;overflow:hidden;cursor:pointer;"
+             onclick="pickImageForPost('${p.id}')" title="Clic para cambiar imagen">
+          ${p.imageThumbnail
+            ? `<img src="${p.imageThumbnail}" alt="" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;">`
+            : `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;opacity:.45;color:#fff;">
+                 <span style="font-size:48px;">${typeEmoji(p.type)}</span>
+                 <span style="font-size:12px;">Toca para elegir imagen</span>
+               </div>`
+          }
+          <div class="cv-change-hint">🖼️ Cambiar imagen</div>
+          <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.72));padding:28px 12px 9px;display:flex;align-items:center;gap:7px;">
+            <span style="font-size:13px;">${typeEmoji(p.type)}</span>
+            <span class="type-badge">${p.type}</span>
+            <span class="appr-date">${fmtDate(p.createdAt)}</span>
+            <span class="appr-status" style="margin-left:auto;">⏳ Pendiente</span>
+          </div>
         </div>
-        <div class="appr-change-hint">🖼️ Cambiar imagen</div>
       </div>` : '';
 
     const imageLabel = isCarousel
@@ -1603,34 +1601,73 @@ function renderPub() {
     el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div><p>No hay publicaciones aún</p></div>`;
     return;
   }
-  el.innerHTML = posts.map(p => `
-    <div class="appr-card">
-      <div class="appr-head">
-        <span style="font-size:18px;">${typeEmoji(p.type)}</span>
-        <span class="type-badge">${p.type}</span>
-        <span style="font-size:11px;color:var(--muted);">${fmtDate(p.approvedAt || p.createdAt)}</span>
-        <span style="margin-left:auto;font-size:11px;">
-          <span class="sdot ${p.status}"></span>${statusLabel(p.status)}
-        </span>
-      </div>
-      <div class="appr-body">
-        <div class="appr-thumb">${typeEmoji(p.type)}</div>
-        <div class="appr-content">
-          <div class="appr-caption">${(p.caption||'').replace(/\n/g,'<br>')}</div>
-          <div class="appr-tags">${p.hashtags||''}</div>
-          ${p.scheduledAt ? `<div class="appr-hint">📅 Programado: ${fmtDate(p.scheduledAt)}</div>` : ''}
-          ${p.bufferId ? `<div class="appr-hint">Buffer ID: ${p.bufferId}</div>` : ''}
-          <div class="appr-actions">
-            ${p.status === 'approved' ? `
-              <button class="btn btn-primary btn-sm" onclick="schedulePost('${p.id}')">📤 Enviar a Buffer</button>
-              <button class="btn btn-ghost btn-sm" onclick="markPublished('${p.id}')">✅ Marcar Publicado</button>
-            ` : ''}
-            <button class="btn btn-ghost btn-sm" onclick="copyPost('${p.id}')">📋 Copiar</button>
-            <button class="btn btn-danger btn-sm" onclick="deletePost('${p.id}')">🗑️</button>
+  el.innerHTML = posts.map(p => {
+    const isCarousel = p.type === 'carousel';
+    const numSlides  = isCarousel ? Math.max(p.slides?.length || 1, p.imageIds?.length || 1) : 1;
+    const aspect     = (p.type === 'story' || p.type === 'reel') ? '4/5' : '1/1';
+    const statusDot  = `<span class="sdot ${p.status}"></span>${statusLabel(p.status)}`;
+
+    // Vista de imagen grande (misma para todos los tipos)
+    const imgArea = isCarousel ? (() => {
+      const slides = [...Array(numSlides)].map((_, i) => {
+        const thumb = p.imageThumbnails?.[i];
+        return `<div class="cv-slide" data-post="${p.id}" data-idx="${i}"
+          style="position:absolute;inset:0;display:${i===0?'flex':'none'};align-items:center;justify-content:center;">
+          ${thumb ? `<img src="${thumb}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;">` : `<span style="opacity:.35;color:#fff;font-size:28px;">🖼️</span>`}
+        </div>`;
+      }).join('');
+      const arrows = numSlides > 1
+        ? `<button class="cv-arrow cv-prev" onclick="event.stopPropagation();carouselNav('${p.id}',-1)">&#8249;</button>
+           <button class="cv-arrow cv-next" onclick="event.stopPropagation();carouselNav('${p.id}',1)">&#8250;</button>` : '';
+      const dots = numSlides > 1
+        ? `<div style="display:flex;justify-content:center;gap:6px;padding:8px 0 4px;">
+             ${[...Array(numSlides)].map((_, i) => `<div class="cv-dot" data-post="${p.id}" data-idx="${i}"
+               onclick="carouselGoTo('${p.id}',${i})"
+               style="width:${i===0?8:6}px;height:${i===0?8:6}px;border-radius:50%;background:${i===0?'var(--green-300)':'var(--border)'};cursor:pointer;transition:all .2s;flex-shrink:0;"></div>`).join('')}
+           </div>` : '';
+      return `<div id="cv-${p.id}" class="carousel-viewer" data-slide="0" style="border-bottom:1px solid var(--border);">
+        <div style="position:relative;aspect-ratio:1;background:#0d0d0d;overflow:hidden;">
+          ${slides}${arrows}
+          <div class="cv-counter" id="cv-counter-${p.id}">1 / ${numSlides}</div>
+          <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.72));padding:24px 12px 9px;display:flex;align-items:center;gap:7px;">
+            <span style="font-size:13px;">🔄</span><span class="type-badge">carrusel</span>
+            <span class="appr-date">${fmtDate(p.approvedAt||p.createdAt)}</span>
+            <span style="margin-left:auto;font-size:10px;color:var(--orange)">${statusDot}</span>
+          </div>
+        </div>${dots}
+      </div>`;
+    })() : `<div style="border-bottom:1px solid var(--border);">
+        <div style="position:relative;aspect-ratio:${aspect};background:#0d0d0d;overflow:hidden;">
+          ${p.imageThumbnail
+            ? `<img src="${p.imageThumbnail}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;">`
+            : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:52px;opacity:.3;">${typeEmoji(p.type)}</div>`
+          }
+          <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.72));padding:28px 12px 9px;display:flex;align-items:center;gap:7px;">
+            <span style="font-size:13px;">${typeEmoji(p.type)}</span><span class="type-badge">${p.type}</span>
+            <span class="appr-date">${fmtDate(p.approvedAt||p.createdAt)}</span>
+            <span style="margin-left:auto;font-size:10px;color:var(--orange)">${statusDot}</span>
           </div>
         </div>
+      </div>`;
+
+    return `<div class="appr-card">
+      ${imgArea}
+      <div class="appr-content">
+        <div class="appr-caption">${(p.caption||'').replace(/\n/g,'<br>')}</div>
+        <div class="appr-tags">${p.hashtags||''}</div>
+        ${p.scheduledAt ? `<div class="appr-hint">📅 Programado: ${fmtDate(p.scheduledAt)}</div>` : ''}
+        ${p.bufferId ? `<div class="appr-hint">Buffer ID: ${p.bufferId}</div>` : ''}
+        <div class="appr-actions">
+          ${p.status === 'approved' ? `
+            <button class="btn btn-primary btn-sm" onclick="schedulePost('${p.id}')">📤 Enviar a Buffer</button>
+            <button class="btn btn-ghost btn-sm" onclick="markPublished('${p.id}')">✅ Marcar Publicado</button>
+          ` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="copyPost('${p.id}')">📋 Copiar</button>
+          <button class="btn btn-danger btn-sm" onclick="deletePost('${p.id}')">🗑️</button>
+        </div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 /* ══════════════════════════════════════════════
