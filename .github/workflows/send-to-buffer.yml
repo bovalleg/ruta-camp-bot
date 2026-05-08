@@ -42,8 +42,10 @@ jobs:
           BUFFER_PROFILE:  ${{ secrets.BUFFER_PROFILE_ID }}
           GOOGLE_API_KEY:  ${{ secrets.GOOGLE_API_KEY }}
         run: |
+          pip install Pillow -q
           python3 - <<'PYEOF'
-          import os, urllib.request, urllib.error, json, re
+          import os, urllib.request, urllib.error, json, re, io
+          from PIL import Image
 
           token      = os.environ.get("BUFFER_TOKEN", "").strip()
           channel    = os.environ.get("BUFFER_PROFILE", "").strip()
@@ -69,6 +71,44 @@ jobs:
           print("Imagenes Drive: " + str(len(image_ids)) + " (" + ", ".join(image_ids) + ")")
           print("Tipo: " + post_type)
 
+          # ── Comprimir imagen si supera 9 MB ──
+          MAX_BYTES = 9 * 1024 * 1024  # 9 MB (Buffer rechaza >10 MB)
+
+          def compress_image(img_bytes, fname):
+              if len(img_bytes) <= MAX_BYTES:
+                  return img_bytes, fname
+              orig_kb = len(img_bytes) // 1024
+              print("  Comprimiendo " + fname + " (" + str(orig_kb) + " KB)...")
+              try:
+                  img = Image.open(io.BytesIO(img_bytes))
+                  # Convertir a RGB (elimina transparencia de PNG, etc.)
+                  if img.mode not in ("RGB", "L"):
+                      img = img.convert("RGB")
+                  base = re.sub(r'\.[^.]+$', '', fname)
+                  out_name = base + ".jpg"
+                  # Intentar distintas calidades JPEG
+                  for quality in (90, 82, 75, 65, 55):
+                      buf = io.BytesIO()
+                      img.save(buf, format="JPEG", quality=quality, optimize=True, subsampling=2)
+                      data = buf.getvalue()
+                      if len(data) <= MAX_BYTES:
+                          print("  Resultado: " + str(len(data)//1024) + " KB (JPEG q=" + str(quality) + ")")
+                          return data, out_name
+                  # Aún muy grande → reducir dimensiones preservando aspecto
+                  w, h = img.size
+                  for scale in (0.85, 0.75, 0.65, 0.55, 0.45):
+                      nw, nh = int(w * scale), int(h * scale)
+                      resized = img.resize((nw, nh), Image.LANCZOS)
+                      buf = io.BytesIO()
+                      resized.save(buf, format="JPEG", quality=75, optimize=True)
+                      data = buf.getvalue()
+                      if len(data) <= MAX_BYTES:
+                          print("  Resultado: " + str(nw) + "x" + str(nh) + " px, " + str(len(data)//1024) + " KB (escala " + str(scale) + ")")
+                          return data, out_name
+              except Exception as e:
+                  print("  Advertencia: no se pudo comprimir (" + str(e) + "), se usará original")
+              return img_bytes, fname
+
           # ── Descargar imágenes de Google Drive ──
           public_image_urls = []
           if image_ids and google_key:
@@ -88,7 +128,10 @@ jobs:
                       dl_url = "https://www.googleapis.com/drive/v3/files/" + image_id + "?alt=media&key=" + google_key
                       with urllib.request.urlopen(urllib.request.Request(dl_url), timeout=30) as r2:
                           img_bytes = r2.read()
-                      print("  [" + str(idx+1) + "] Descargado: " + str(len(img_bytes)) + " bytes")
+                      print("  [" + str(idx+1) + "] Descargado: " + str(len(img_bytes)//1024) + " KB")
+
+                      # Comprimir si es necesario
+                      img_bytes, fname = compress_image(img_bytes, fname)
 
                       safe_name = re.sub(r'[^a-zA-Z0-9._-]', '_', fname)
                       media_path = "media/" + safe_name
