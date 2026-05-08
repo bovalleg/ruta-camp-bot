@@ -965,31 +965,54 @@ async function callClaude(messages) {
 const DEST_KEYWORDS = {
   'puerto-fuy':    ['fuy', 'puerto fuy', 'puerto-fuy', 'huilo', 'huilo-huilo', 'huilohilo'],
   'puelo':         ['puelo', 'tagua tagua', 'lago puelo', 'base puelo', 'tagua'],
-  'conguillio':    ['conguillio', 'conguillío', 'llaima', 'melipeuco', 'domo', 'araucania', 'araucanía'],
+  // 'melipeuco' y 'conguillio' pueden aparecer como claves separadas según cómo las nombre el bot de diseño
+  'melipeuco':     ['melipeuco', 'melipi', 'llaima domo', 'llaima'],
+  'conguillio':    ['conguillio', 'conguillío', 'conguillio', 'domo conguillio', 'araucania', 'araucanía'],
   'malalcahuello': ['malalcahuello', 'warara'],
   'dron':          ['dron', 'drone', 'aéreo', 'aérea', 'aerial'],
   'red':           ['red', 'general', 'todos', 'todas', 'ruta camp', 'completa', 'la red'],
 };
 
-// Parse un archivo del Output Bot según la convención de nombres
-// rutacamp_{destino}_{tipo}_{timestamp}_{orden}.ext
+// Parse un archivo del Output Bot según la convención de nombres.
+// Soporta múltiples variantes:
+//   rutacamp_{dest}_{tipo}_{ts}_{orden}.ext        (ej: _01, _2of5, _3de5)
+//   rutacamp_{dest}_{tipo}_{ts}.ext                (sin orden)
+//   rutacamp_{dest}_{ts}.ext                       (legacy sin tipo — asume 'post')
 function parseOutputBotFile(file) {
-  const m = file.name.match(
-    /^rutacamp_([^_]+)_(post|story|carrusel|carousel|reel)_([\dT\-:]+?)(?:_(\d+))?\.(\w+)$/i
-  );
-  if (!m) return null;
-  // Thumbnail: usar URL autenticada de Drive (funciona si el usuario está logueado en Google)
   const thumbUrl = `https://drive.google.com/thumbnail?id=${file.id}&sz=w600`;
-  return {
-    id:            file.id,
-    name:          file.name,
-    destination:   m[1].toLowerCase(),
-    type:          m[2].toLowerCase().replace('carousel','carrusel'),
-    timestamp:     m[3],
-    order:         m[4] ? parseInt(m[4], 10) : 1,
-    thumbnailLink: thumbUrl,
-    mimeType:      file.mimeType || '',
+  const base = {
+    id: file.id, name: file.name,
+    thumbnailLink: thumbUrl, mimeType: file.mimeType || '',
   };
+
+  // Formato moderno: con tipo explícito
+  // Orden puede ser _01, _1, _2of5, _3de5, etc. → capturamos dígitos iniciales
+  let m = file.name.match(
+    /^rutacamp_([^_]+)_(post|story|carrusel|carousel|reel)_([\dT\-:]+?)(?:_(\d+)\w*)?\.(\w+)$/i
+  );
+  if (m) {
+    return {
+      ...base,
+      destination: m[1].toLowerCase(),
+      type:        m[2].toLowerCase().replace('carousel', 'carrusel'),
+      timestamp:   m[3],
+      order:       m[4] ? parseInt(m[4], 10) : 1,
+    };
+  }
+
+  // Formato legacy: sin campo tipo → asumimos 'post'
+  m = file.name.match(/^rutacamp_([^_]+)_([\dT\-:]+)\.(\w+)$/i);
+  if (m) {
+    return {
+      ...base,
+      destination: m[1].toLowerCase(),
+      type:        'post',
+      timestamp:   m[2],
+      order:       1,
+    };
+  }
+
+  return null; // nombre no reconocido
 }
 
 // Cargar archivos del Output Bot folder desde Drive
