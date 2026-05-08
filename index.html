@@ -897,6 +897,7 @@ Para UN SOLO post/reel/historia/carrusel:
   "caption": "Texto principal del post (puede tener emojis y saltos de línea con \\n)",
   "hashtags": "#hashtag1 #hashtag2 ...",
   "imageDescription": "Descripción detallada de la imagen o video ideal para este post",
+  "destination": "Clave exacta del destino (ej: puerto-fuy, conguillio, puelo, malalcahuello, red). Déjalo vacío si no aplica.",
   "scheduleHint": "Sugerencia de horario óptimo (ej: Martes 9:00am)",
   "slides": []
 }
@@ -907,6 +908,7 @@ Para CARRUSELES, incluye las diapositivas en "slides":
   "caption": "...",
   "hashtags": "...",
   "imageDescription": "...",
+  "destination": "clave-del-destino",
   "scheduleHint": "...",
   "slides": [
     {"caption": "Slide 1", "imageDescription": "Imagen slide 1"},
@@ -1051,7 +1053,7 @@ function detectTypeFromMessage(msg) {
 // Encontrar diseños que coincidan con tipo y destino.
 // usedIds: Set de IDs ya usados (para no repetir en lotes).
 // Siempre devuelve algo si hay archivos del tipo correcto (con fallback a cualquier destino).
-function findMatchingDesigns(contextText, type, usedIds = new Set()) {
+function findMatchingDesigns(contextText, type, usedIds = new Set(), destOverride = null) {
   const parsed = S.outputBotFiles.map(parseOutputBotFile).filter(Boolean);
 
   const reqType = type === 'carousel' ? 'carrusel'
@@ -1068,7 +1070,9 @@ function findMatchingDesigns(contextText, type, usedIds = new Set()) {
     byType.push(...any);
   }
 
-  const destMatch = detectDestination(contextText);
+  // destOverride = campo "destination" que Claude asignó explícitamente.
+  // Si no viene, intentar detectar desde el texto (fallback legacy).
+  const destMatch = destOverride || detectDestination(contextText);
 
   // Puntuar: destino exacto → 10; 'red' → 3; cualquier otro → 1 (siempre algo)
   const scored = byType.map(f => ({
@@ -1208,7 +1212,7 @@ async function sendWithDesignBot(userText, typeLabelIn, loadEl) {
     return;
   }
 
-  // 2. Claude genera el contenido — le pedimos que incluya el destino en imageDescription
+  // 2. Claude genera el contenido — le pedimos que asigne el campo "destination" explícito por post
   const typeLabel = { post:'post', reel:'reel', story:'historia', carousel:'carrusel' }[S.type];
 
   // Listar destinos disponibles en el Output Bot para darle contexto a Claude
@@ -1216,12 +1220,12 @@ async function sendWithDesignBot(userText, typeLabelIn, loadEl) {
     S.outputBotFiles.map(parseOutputBotFile).filter(Boolean).map(f => f.destination)
   )];
   const destsHint = availDests.length
-    ? `\nDestinos disponibles en el bot de diseño: ${availDests.join(', ')}. Usa estos nombres exactos en imageDescription.`
+    ? `\n\nDestinos disponibles en el bot de diseño: ${availDests.map(d => `"${d}"`).join(', ')}.`
     : '';
 
   const prompt = `Tipo de contenido solicitado: ${typeLabel}\n\nSolicitud del usuario: ${userText}${destsHint}
 
-IMPORTANTE: En el campo "imageDescription" de cada post incluye SIEMPRE el nombre exacto del destino/lugar (ej: "puerto-fuy", "conguillio", "puelo") para que el sistema pueda seleccionar la imagen correcta automáticamente.`;
+CRÍTICO: En el campo "destination" de CADA post pon UNO de estos valores exactos: ${availDests.map(d => `"${d}"`).join(', ')}. Asigna el destino que corresponde a esa publicación según lo que pide el usuario. Si el usuario pide posts de distintos destinos, distribúyelos correctamente. NO dejes "destination" igual en todos los posts si el usuario pidió destinos diferentes.`;
   const res    = await callClaude([{ role:'user', content: prompt }]);
   const text2  = res.content[0].text;
 
@@ -1238,14 +1242,15 @@ IMPORTANTE: En el campo "imageDescription" de cada post incluye SIEMPRE el nombr
 
   const saved = posts.map(p => {
     const postType = p.type || S.type;
-    // Usar SOLO el contenido individual del post para detectar destino
-    // (NO incluir userText — contaminaría todos los posts con todos los destinos)
+    // Usar el campo "destination" que Claude asignó explícitamente (más fiable que keyword detection).
+    // Como fallback, intentar detectar desde el texto del post.
+    const destOverride = p.destination || null;
     const context = [
       p.imageDescription || '',
       p.caption || '',
       (p.slides || []).map(s => s.caption || '').join(' '),
     ].join(' ').trim();
-    const match   = findMatchingDesigns(context, postType, usedIds);
+    const match   = findMatchingDesigns(context, postType, usedIds, destOverride);
 
     const postData = {
       ...p,
