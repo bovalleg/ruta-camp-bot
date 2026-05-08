@@ -1208,9 +1208,20 @@ async function sendWithDesignBot(userText, typeLabelIn, loadEl) {
     return;
   }
 
-  // 2. Claude genera el contenido normalmente (igual que modo sin diseño)
+  // 2. Claude genera el contenido — le pedimos que incluya el destino en imageDescription
   const typeLabel = { post:'post', reel:'reel', story:'historia', carousel:'carrusel' }[S.type];
-  const prompt = `Tipo de contenido solicitado: ${typeLabel}\n\nSolicitud del usuario: ${userText}`;
+
+  // Listar destinos disponibles en el Output Bot para darle contexto a Claude
+  const availDests = [...new Set(
+    S.outputBotFiles.map(parseOutputBotFile).filter(Boolean).map(f => f.destination)
+  )];
+  const destsHint = availDests.length
+    ? `\nDestinos disponibles en el bot de diseño: ${availDests.join(', ')}. Usa estos nombres exactos en imageDescription.`
+    : '';
+
+  const prompt = `Tipo de contenido solicitado: ${typeLabel}\n\nSolicitud del usuario: ${userText}${destsHint}
+
+IMPORTANTE: En el campo "imageDescription" de cada post incluye SIEMPRE el nombre exacto del destino/lugar (ej: "puerto-fuy", "conguillio", "puelo") para que el sistema pueda seleccionar la imagen correcta automáticamente.`;
   const res    = await callClaude([{ role:'user', content: prompt }]);
   const text2  = res.content[0].text;
 
@@ -1227,8 +1238,13 @@ async function sendWithDesignBot(userText, typeLabelIn, loadEl) {
 
   const saved = posts.map(p => {
     const postType = p.type || S.type;
-    // Buscar diseño usando caption/imageDescription como contexto de destino
-    const context = (p.imageDescription || p.caption || '') + ' ' + userText;
+    // Usar SOLO el contenido individual del post para detectar destino
+    // (NO incluir userText — contaminaría todos los posts con todos los destinos)
+    const context = [
+      p.imageDescription || '',
+      p.caption || '',
+      (p.slides || []).map(s => s.caption || '').join(' '),
+    ].join(' ').trim();
     const match   = findMatchingDesigns(context, postType, usedIds);
 
     const postData = {
